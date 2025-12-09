@@ -8,6 +8,7 @@ from .classification import DocumentClassifier
 from .extraction import DigitalPDFExtractor, ScannedPDFExtractor, BaseExtractor
 from .enrichment.llm import LLMEnricher
 from .embeddings import OpenAIEmbeddings, VectorStore, EmbeddingsProvider
+from .validation import Validator
 
 class DocumentPipeline:
     """
@@ -22,6 +23,7 @@ class DocumentPipeline:
         self.enricher = LLMEnricher(api_key=openai_api_key)
         self.embedding_provider = embedding_provider or OpenAIEmbeddings(api_key=openai_api_key)
         self.vector_store = vector_store or VectorStore()
+        self.validator = Validator()
         
         # Extractors
         self.digital_extractor = DigitalPDFExtractor()
@@ -53,7 +55,10 @@ class DocumentPipeline:
         # 4. Enrichment
         self.enrich(result)
         
-        # 5. Embedding & Storage
+        # 5. Validation
+        self.validator.validate(result)
+        
+        # 6. Embedding & Storage
         self.embed_and_store(result)
         
         return result

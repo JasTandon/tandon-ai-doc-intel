@@ -14,4 +14,8 @@ class DocumentResult:
     embeddings: Optional[List[float]] = None
     risk_analysis: Optional[Dict[str, Any]] = None
     chunks: List[str] = field(default_factory=list)
+    
+    # Validation
+    validation_score: float = 1.0
+    validation_issues: List[str] = field(default_factory=list)
 

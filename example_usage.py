@@ -30,6 +30,19 @@ def main():
         print(f"Text Length: {len(result.text)} chars")
         print(f"Summary: {result.summary}")
         print(f"Entities Found: {len(result.entities)}")
+        
+        if result.tables:
+            print(f"Tables Found: {len(result.tables)}")
+            # Print first table's simple structure or shape if available
+            print(f"Table 1 info: {result.tables[0].get('accuracy')}% accuracy")
+
+        # Validation Logic
+        print(f"Validation Score: {result.validation_score:.2f}")
+        if result.validation_issues:
+            print("Validation Issues Found:")
+            for issue in result.validation_issues:
+                print(f" - {issue}")
+                
         if result.risk_analysis:
             print(f"Risk Level: {result.risk_analysis.get('risk_level')}")
         
@@ -41,4 +54,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
