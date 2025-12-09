@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 from sklearn.decomposition import PCA, NMF
 from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import TfidfVectorizer
+from openai import OpenAI
 from tandon_ai_doc_intel import DocumentPipeline
 
 st.set_page_config(
@@ -20,6 +21,45 @@ st.set_page_config(
     page_icon="📄",
     layout="wide"
 )
+
+def get_ai_explanation(context_data, analysis_type, api_key):
+    """
+    Generates a natural language explanation for data metrics using OpenAI.
+    Uses st.session_state to cache results to save API calls.
+    """
+    if not api_key:
+        return None
+
+    # Create a cache key
+    cache_key = f"insight_{analysis_type}_{hash(str(context_data))}"
+    
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+
+    client = OpenAI(api_key=api_key)
+    
+    prompts = {
+        "latency": f"Analyze these pipeline processing times (in seconds): {context_data}. Explain what the data represents and identify which stage is the bottleneck. Keep it concise (max 2 sentences).",
+        "topics": f"Here are latent topics extracted from a document using NMF: {context_data}. Synthesize these into a 1-sentence description of the document's thematic content.",
+        "readability_dist": f"Analyze this readability distribution statistics for a corpus: {context_data}. Flesch scores: 90-100 (Very Easy), 0-30 (Very Confusing). Explain what this distribution implies about the target audience/complexity.",
+        "global_topics": f"Here are the dominant topics found across a document corpus: {context_data}. Provide a high-level summary of what this collection of documents is about."
+    }
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a data analyst expert in document intelligence. Provide clear, data-driven explanations."},
+                {"role": "user", "content": prompts.get(analysis_type, str(context_data))}
+            ],
+            temperature=0.3,
+            max_tokens=150
+        )
+        insight = response.choices[0].message.content
+        st.session_state[cache_key] = insight
+        return insight
+    except Exception:
+        return None
 
 def main():
     st.title("📄 Tandon AI Document Intelligence")
@@ -116,11 +156,11 @@ def main():
     if "results" in st.session_state and st.session_state.results:
         results = st.session_state.results
         if len(results) == 1:
-            render_single_document_view(results[0])
+            render_single_document_view(results[0], api_key)
         else:
-            render_aggregate_view(results)
+            render_aggregate_view(results, api_key)
 
-def render_single_document_view(result):
+def render_single_document_view(result, api_key=None):
     # 1. Scientific Metrics Row
     col1, col2, col3, col4, col5 = st.columns(5)
     
@@ -172,14 +212,25 @@ def render_single_document_view(result):
                 st.plotly_chart(fig, use_container_width=True)
             with c2:
                     st.dataframe(df_time, use_container_width=True)
+            
+            # AI Insight
+            insight = get_ai_explanation(timings, "latency", api_key)
+            if insight:
+                st.info(f"**🤖 AI Latency Analysis:** {insight}")
 
     with tab2:
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("Topic Modeling (NMF)")
+            st.markdown("*Non-Negative Matrix Factorization extracts latent themes from text chunks.*")
             if result.topics:
                 for t in result.topics:
                     st.markdown(f"- **{t}**")
+                
+                # AI Insight for Topics
+                topic_insight = get_ai_explanation(result.topics, "topics", api_key)
+                if topic_insight:
+                    st.success(f"**🤖 AI Topic Synthesis:** {topic_insight}")
             else:
                 st.info("Not enough text chunks.")
 
@@ -239,7 +290,7 @@ def render_single_document_view(result):
         st.text_area("Full Text", result.text, height=400)
 
 
-def render_aggregate_view(results):
+def render_aggregate_view(results, api_key=None):
     st.header(f"Corpus Analysis ({len(results)} Documents)")
     
     # Create main dataframe
@@ -295,6 +346,12 @@ def render_aggregate_view(results):
             st.subheader("Readability Distribution")
             fig = px.histogram(df, x="Readability (Flesch)", nbins=20, title="Document Complexity", color="Type")
             st.plotly_chart(fig, use_container_width=True)
+            
+            # AI Insight for Readability
+            readability_stats = df["Readability (Flesch)"].describe().to_dict()
+            r_insight = get_ai_explanation(readability_stats, "readability_dist", api_key)
+            if r_insight:
+                 st.info(f"**🤖 AI Insight:** {r_insight}")
             
         with col2:
             st.subheader("Sentiment Distribution")
@@ -356,12 +413,22 @@ def render_aggregate_view(results):
                     
                     feature_names = vectorizer.get_feature_names_out()
                     cols = st.columns(3)
+                    
+                    global_topic_summary = []
+                    
                     for topic_idx, topic in enumerate(nmf.components_):
                         top_features_ind = topic.argsort()[:-6:-1]
                         topic_words = [feature_names[i] for i in top_features_ind]
+                        global_topic_summary.append(f"Topic {topic_idx+1}: {', '.join(topic_words)}")
                         
                         with cols[topic_idx]:
                             st.info(f"**Topic {topic_idx+1}**\n\n" + ", ".join(topic_words))
+                            
+                    # AI Insight for Global Topics
+                    g_insight = get_ai_explanation(global_topic_summary, "global_topics", api_key)
+                    if g_insight:
+                        st.success(f"**🤖 AI Corpus Summary:** {g_insight}")
+                        
             except Exception as e:
                 st.warning(f"Could not generate global topics: {e}")
         else:
@@ -388,7 +455,4 @@ def render_aggregate_view(results):
         st.markdown(f"#### Analysis for: **{selected_doc_name}**")
         
         # Re-use the single document view renderer
-        render_single_document_view(selected_result)
-
-if __name__ == "__main__":
-    main()
+        render_single_document_view(selected_result, api_key)
