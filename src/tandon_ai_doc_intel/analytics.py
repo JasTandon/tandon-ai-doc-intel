@@ -23,12 +23,15 @@ class AdvancedAnalytics:
             
         blob = TextBlob(result.text)
 
-        # 1. Readability Metrics (Flesch Reading Ease)
-        # 90-100 : Very Easy, 0-30 : Very Confusing
+        # 1. Readability Metrics
         try:
             result.readability_score = textstat.flesch_reading_ease(result.text)
+            result.gunning_fog = textstat.gunning_fog(result.text)
+            result.automated_readability_index = textstat.automated_readability_index(result.text)
         except:
             result.readability_score = 0.0
+            result.gunning_fog = 0.0
+            result.automated_readability_index = 0.0
             
         # 2. Semantic Analysis (Sentiment & Subjectivity)
         try:

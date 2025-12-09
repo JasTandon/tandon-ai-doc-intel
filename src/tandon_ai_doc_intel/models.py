@@ -29,4 +29,8 @@ class DocumentResult:
     sentiment_polarity: float = 0.0 # -1.0 (Negative) to 1.0 (Positive)
     sentiment_subjectivity: float = 0.0 # 0.0 (Objective) to 1.0 (Subjective)
     lexical_diversity: float = 0.0 # Unique words / Total words
+    
+    # Advanced Readability
+    gunning_fog: float = 0.0 
+    automated_readability_index: float = 0.0
 
