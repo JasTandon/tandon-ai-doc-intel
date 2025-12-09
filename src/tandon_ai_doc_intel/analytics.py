@@ -3,6 +3,7 @@ import textstat
 from typing import List, Dict, Any
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.decomposition import NMF
+from textblob import TextBlob
 import numpy as np
 from .models import DocumentResult
 
@@ -14,10 +15,13 @@ class AdvancedAnalytics:
 
     def analyze(self, result: DocumentResult) -> DocumentResult:
         """
-        Enriches the result with readability scores, ML-based keywords, and topic modeling.
+        Enriches the result with readability scores, ML-based keywords, topic modeling,
+        sentiment analysis, and lexical metrics.
         """
         if not result.text:
             return result
+            
+        blob = TextBlob(result.text)
 
         # 1. Readability Metrics (Flesch Reading Ease)
         # 90-100 : Very Easy, 0-30 : Very Confusing
@@ -25,8 +29,23 @@ class AdvancedAnalytics:
             result.readability_score = textstat.flesch_reading_ease(result.text)
         except:
             result.readability_score = 0.0
+            
+        # 2. Semantic Analysis (Sentiment & Subjectivity)
+        try:
+            result.sentiment_polarity = blob.sentiment.polarity
+            result.sentiment_subjectivity = blob.sentiment.subjectivity
+        except:
+            pass
+            
+        # 3. Lexical Diversity (Type-Token Ratio)
+        try:
+            words = blob.words
+            if len(words) > 0:
+                result.lexical_diversity = len(set(words.lower())) / len(words)
+        except:
+            pass
 
-        # 2. Traditional ML: Keyphrase Extraction (TF-IDF)
+        # 4. Traditional ML: Keyphrase Extraction (TF-IDF)
         # Contrast this with LLM entities in your paper
         try:
             # Treat sentences as documents for TF-IDF context

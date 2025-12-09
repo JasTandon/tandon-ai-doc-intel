@@ -12,6 +12,7 @@ plotly
 pandas
 textstat
 scikit-learn
+textblob
 
 [dev]
 pytest

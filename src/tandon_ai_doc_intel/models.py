@@ -24,4 +24,9 @@ class DocumentResult:
     processing_time_seconds: Dict[str, float] = field(default_factory=dict)
     ml_keywords: List[str] = field(default_factory=list) # TF-IDF/RAKE
     topics: List[str] = field(default_factory=list) # NMF/LDA Topics
+    
+    # Semantic Metrics
+    sentiment_polarity: float = 0.0 # -1.0 (Negative) to 1.0 (Positive)
+    sentiment_subjectivity: float = 0.0 # 0.0 (Objective) to 1.0 (Subjective)
+    lexical_diversity: float = 0.0 # Unique words / Total words
 

@@ -1,4 +1,4 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: tandon_ai_doc_intel
 Version: 0.1.0
 Summary: A modular document-processing pipeline for AI-powered document intelligence.
@@ -23,11 +23,13 @@ Requires-Dist: plotly
 Requires-Dist: pandas
 Requires-Dist: textstat
 Requires-Dist: scikit-learn
+Requires-Dist: textblob
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
 Requires-Dist: black; extra == "dev"
 Requires-Dist: isort; extra == "dev"
 Requires-Dist: flake8; extra == "dev"
+Dynamic: license-file
 
 # Tandon AI Document Intelligence
 
