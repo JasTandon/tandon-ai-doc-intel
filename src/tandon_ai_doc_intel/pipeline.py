@@ -9,6 +9,8 @@ from .extraction import DigitalPDFExtractor, ScannedPDFExtractor, BaseExtractor
 from .enrichment.llm import LLMEnricher
 from .embeddings import OpenAIEmbeddings, VectorStore, EmbeddingsProvider
 from .validation import Validator
+from .analytics import AdvancedAnalytics
+import time
 
 class DocumentPipeline:
     """
@@ -24,6 +26,7 @@ class DocumentPipeline:
         self.embedding_provider = embedding_provider or OpenAIEmbeddings(api_key=openai_api_key)
         self.vector_store = vector_store or VectorStore()
         self.validator = Validator()
+        self.analytics = AdvancedAnalytics()
         
         # Extractors
         self.digital_extractor = DigitalPDFExtractor()
@@ -33,15 +36,24 @@ class DocumentPipeline:
         """
         Runs the full pipeline on a document source.
         """
+        timings = {}
+        t_start = time.time()
+
         # 1. Ingestion
+        t0 = time.time()
         file_bytes = DocumentIngestor.ingest(source)
+        timings["Ingestion"] = time.time() - t0
         
         # 2. Classification
+        t0 = time.time()
         is_digital = DocumentClassifier.is_digital_pdf(file_bytes)
         extractor = self.digital_extractor if is_digital else self.scanned_extractor
+        timings["Classification"] = time.time() - t0
         
         # 3. Extraction
+        t0 = time.time()
         text, tables = extractor.extract(file_bytes)
+        timings["Extraction"] = time.time() - t0
         
         result = DocumentResult(
             text=text,
@@ -52,15 +64,29 @@ class DocumentPipeline:
             }
         )
         
-        # 4. Enrichment
+        # 4. Enrichment (includes Chunking)
+        t0 = time.time()
         self.enrich(result)
+        timings["Enrichment"] = time.time() - t0
         
         # 5. Validation
+        t0 = time.time()
         self.validator.validate(result)
+        timings["Validation"] = time.time() - t0
+
+        # 6. Advanced Analytics (ML & Metrics)
+        t0 = time.time()
+        self.analytics.analyze(result)
+        timings["Analytics"] = time.time() - t0
         
-        # 6. Embedding & Storage
+        # 7. Embedding & Storage
+        t0 = time.time()
         self.embed_and_store(result)
+        timings["Embedding"] = time.time() - t0
         
+        timings["Total"] = time.time() - t_start
+        result.processing_time_seconds = timings
+
         return result
 
     def extract(self, source: Union[str, Path, bytes, BinaryIO]) -> DocumentResult:
