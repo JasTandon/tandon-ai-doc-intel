@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tandon_ai_doc_intel"
+version = "0.1.0"
+description = "A modular document-processing pipeline for AI-powered document intelligence."
+authors = [
+  { name = "User", email = "user@example.com" },
+]
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pymupdf",
+    "pytesseract",
+    "openai",
+    "chromadb",
+    "pydantic",
+    "python-magic",
+    "langchain", # Useful for chunking and other utils
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "isort",
+    "flake8"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
