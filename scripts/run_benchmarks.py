@@ -6,6 +6,7 @@ import csv
 import time
 import os
 import sys
+import yaml
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -22,6 +23,14 @@ from tandon_ai_doc_intel.metrics import (
 )
 from tandon_ai_doc_intel.embeddings import OpenAIEmbeddings, VectorStore
 
+def load_manifest(manifest_path: Path) -> Dict[str, Any]:
+    if not manifest_path.exists():
+        return {}
+    with manifest_path.open("r", encoding="utf-8") as f:
+        if manifest_path.suffix in ['.yaml', '.yml']:
+            return yaml.safe_load(f)
+        return json.load(f)
+
 def load_ground_truth(meta_path: Path) -> Dict[str, Any]:
     if not meta_path.exists():
         return {}
@@ -31,6 +40,7 @@ def load_ground_truth(meta_path: Path) -> Dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run document pipeline benchmarks.")
     parser.add_argument("--data-dir", type=str, required=True, help="Folder with PDFs/docs.")
+    parser.add_argument("--manifest", type=str, help="Path to dataset manifest (JSON/YAML).")
     parser.add_argument("--output-csv", type=str, default="benchmark_results.csv")
     parser.add_argument("--max-docs", type=int, default=None)
     parser.add_argument("--k", type=int, default=5, help="k for retrieval metrics")
@@ -47,19 +57,51 @@ def main() -> None:
     rows: List[Dict[str, Any]] = []
     start_all = time.time()
     
-    # Simple convention: PDFs in data_dir, ground truth in data_dir/gt/{stem}.json
-    files = sorted(list(data_dir.glob("*.pdf")))
+    # Files to process
+    files_to_process = []
+    manifest_data = {}
+    
+    if args.manifest:
+        manifest_path = Path(args.manifest)
+        manifest_data = load_manifest(manifest_path)
+        # Assuming manifest has list of documents
+        if 'documents' in manifest_data:
+            for doc_entry in manifest_data['documents']:
+                fpath = data_dir / doc_entry['file']
+                if fpath.exists():
+                    files_to_process.append((fpath, doc_entry))
+        else:
+             print("Manifest missing 'documents' key. Falling back to glob.")
+             files = sorted(list(data_dir.glob("*.pdf")))
+             files_to_process = [(f, {}) for f in files]
+    else:
+        files = sorted(list(data_dir.glob("*.pdf")))
+        files_to_process = [(f, {}) for f in files]
     
     if args.max_docs:
-        files = files[: args.max_docs]
+        files_to_process = files_to_process[: args.max_docs]
         
-    print(f"Found {len(files)} documents to process.")
+    print(f"Found {len(files_to_process)} documents to process.")
     
-    for pdf_path in files:
-        doc_id = pdf_path.stem
-        gt_path = data_dir / "gt" / f"{doc_id}.json"
-        gt = load_ground_truth(gt_path)
+    total_cost = 0.0
+    
+    for pdf_path, manifest_entry in files_to_process:
+        doc_id = manifest_entry.get('id', pdf_path.stem)
         
+        # Try to find ground truth: 
+        # 1. In manifest entry ('gt_text')
+        # 2. In separate file data_dir/gt/{doc_id}.json
+        
+        gt = {}
+        if 'gt_text' in manifest_entry:
+            gt['text'] = manifest_entry['gt_text']
+        else:
+            gt_path = data_dir / "gt" / f"{doc_id}.json"
+            gt = load_ground_truth(gt_path)
+        
+        if 'is_digital' in manifest_entry:
+            gt['is_digital'] = manifest_entry['is_digital']
+
         print(f"Processing {pdf_path.name} ...")
         try:
             result = pipeline.process(str(pdf_path))
@@ -71,8 +113,12 @@ def main() -> None:
                 "source_size": result.metadata.get("source_size"),
                 "validation_score": result.validation_score,
                 "factuality_score": result.factuality_score,
-                "est_cost_usd": result.cost_estimate_usd
+                "est_cost_usd": result.cost_estimate_usd,
+                "input_tokens": result.token_usage.get("llm_input", 0),
+                "output_tokens": result.token_usage.get("llm_output", 0)
             }
+            
+            total_cost += result.cost_estimate_usd
             
             # Timings
             for stage, secs in (result.processing_time_seconds or {}).items():
@@ -125,22 +171,54 @@ def main() -> None:
         
     print(f"Wrote results to {output_csv}")
     
-    # Retrieval evaluation (if you have a query file)
-    queries_path = data_dir / "queries.json"
+    # --- Aggregated Statistics ---
+    agg_stats = {
+        "total_docs": len(rows),
+        "total_time_s": total_time,
+        "throughput_docs_s": throughput,
+        "total_cost_usd": total_cost,
+        "mean_cost_per_doc": total_cost / len(rows) if rows else 0,
+        "mean_validation_score": sum(r.get("validation_score", 0) for r in rows) / len(rows),
+        "mean_readability": sum(r.get("readability", 0) for r in rows) / len(rows)
+    }
     
-    if queries_path.exists() and args.api_key:
-        print("\nRunning retrieval evaluation...")
-        with queries_path.open("r", encoding="utf-8") as f:
-            qdata = json.load(f)
-            
-        queries = [q["query"] for q in qdata]
-        relevant_ids = [q["relevant_ids"] for q in qdata]
+    # Mean CER/WER if available
+    cers = [r["cer"] for r in rows if "cer" in r]
+    if cers:
+        agg_stats["mean_cer"] = sum(cers) / len(cers)
         
-        # We need to access the pipeline's components
+    wers = [r["wer"] for r in rows if "wer" in r]
+    if wers:
+        agg_stats["mean_wer"] = sum(wers) / len(wers)
+        
+    # Write Aggregated Stats
+    agg_csv = output_csv.with_name(f"{output_csv.stem}_summary.csv")
+    with agg_csv.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=agg_stats.keys())
+        writer.writeheader()
+        writer.writerow(agg_stats)
+    print(f"Wrote summary stats to {agg_csv}")
+    
+    # Retrieval evaluation (if you have a query file)
+    # Check manifest first
+    queries = []
+    relevant_ids = []
+    
+    if 'queries' in manifest_data:
+        for q in manifest_data['queries']:
+            queries.append(q['query'])
+            relevant_ids.append(q['relevant_ids'])
+    else:
+        queries_path = data_dir / "queries.json"
+        if queries_path.exists():
+             with queries_path.open("r", encoding="utf-8") as f:
+                qdata = json.load(f)
+                queries = [q["query"] for q in qdata]
+                relevant_ids = [q["relevant_ids"] for q in qdata]
+
+    if queries and args.api_key:
+        print("\nRunning retrieval evaluation...")
         embedder = pipeline.embedding_provider
-        # IMPORTANT: This assumes the vector store already has the documents indexed
-        # from the processing loop above.
-        # Since pipeline.process() calls embed_and_store(), they should be in there.
         vs = pipeline.vector_store
         
         try:
@@ -160,4 +238,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

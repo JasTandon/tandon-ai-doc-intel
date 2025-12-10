@@ -334,6 +334,7 @@ def _serialize_result(res):
         "entity_density": res.entity_density,
         "sentence_complexity": res.sentence_complexity,
         "cost_estimate": res.cost_estimate_usd,
+        "token_usage": res.token_usage,
         "factuality_score": res.factuality_score,
         "ocr_cer": res.ocr_cer,
         "ocr_wer": res.ocr_wer
@@ -584,6 +585,13 @@ def update_inspector(selected_idx, data, api_key):
         dbc.CardHeader("📑 Cost Analysis and Factuality Score Metrics", className="text-light"),
         dbc.ListGroup([
             dbc.ListGroupItem(f"💰 Est. Cost: ${doc.get('cost_estimate', 0.0):.6f}", className="bg-dark text-light"),
+            dbc.ListGroupItem(
+                html.Div([
+                    html.Span("🔢 Token Usage: "),
+                    html.Span(f"In: {doc.get('token_usage', {}).get('llm_input', 0)} | Out: {doc.get('token_usage', {}).get('llm_output', 0)}", className="text-muted ms-1")
+                ]), 
+                className="bg-dark text-light"
+            ),
             dbc.ListGroupItem(f"✅ Factuality Score: {doc.get('factuality_score', 0.0):.2f}", className="bg-dark text-light", id="tooltip-factuality"),
             
             # OCR Metrics (CER/WER) - Show N/A if not available

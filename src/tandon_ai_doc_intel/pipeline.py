@@ -29,7 +29,10 @@ class DocumentPipeline:
                  config: Optional[PipelineConfig] = None):
         
         self.config = config or PipelineConfig()
-        self.enricher = LLMEnricher(api_key=openai_api_key)
+        
+        # Pass caching preference to Enricher
+        self.enricher = LLMEnricher(api_key=openai_api_key, use_caching=self.config.use_caching)
+        
         self.embedding_provider = embedding_provider or OpenAIEmbeddings(api_key=openai_api_key)
         self.vector_store = vector_store or VectorStore()
         self.validator = Validator()
@@ -38,7 +41,8 @@ class DocumentPipeline:
         
         # Extractors
         self.digital_extractor = DigitalPDFExtractor()
-        self.scanned_extractor = ScannedPDFExtractor()
+        # Enable preprocessing for scanned PDF extractor if needed (can be added to config)
+        self.scanned_extractor = ScannedPDFExtractor(enable_preprocessing=True)
 
     def process(self, source: Union[str, Path, bytes, BinaryIO]) -> DocumentResult:
         """
@@ -49,114 +53,140 @@ class DocumentPipeline:
         
         logger.info(f"  [Pipeline] Starting processing...")
 
-        # 1. Ingestion
-        t0 = time.time()
-        file_bytes = DocumentIngestor.ingest(source)
-        timings["Ingestion"] = time.time() - t0
-        logger.info(f"  [Pipeline] Ingestion done ({timings['Ingestion']:.2f}s)")
-        
-        # 2. Classification
-        t0 = time.time()
-        if self.config.extractor_mode == "digital_only":
-            is_digital = True
-        elif self.config.extractor_mode == "scanned_only":
-            is_digital = False
-        else:
-            is_digital = DocumentClassifier.is_digital_pdf(file_bytes)
-            
-        extractor = self.digital_extractor if is_digital else self.scanned_extractor
-        timings["Classification"] = time.time() - t0
-        logger.info(f"  [Pipeline] Classification done ({timings['Classification']:.2f}s) - {'Digital' if is_digital else 'Scanned'}")
-        
-        # 3. Extraction
-        t0 = time.time()
-        text, tables = extractor.extract(file_bytes)
-        timings["Extraction"] = time.time() - t0
-        logger.info(f"  [Pipeline] Extraction done ({timings['Extraction']:.2f}s) - {len(text)} chars, {len(tables)} tables")
-        
-        result = DocumentResult(
-            text=text,
-            tables=tables,
-            metadata={
-                "is_digital_pdf": is_digital,
-                "source_size": len(file_bytes)
-            }
-        )
-        
-        # 4. Enrichment (includes Chunking)
-        if self.config.enable_enrichment:
-            t0 = time.time()
-            self.enrich(result)
-            timings["Enrichment"] = time.time() - t0
-            logger.info(f"  [Pipeline] Enrichment done ({timings['Enrichment']:.2f}s)")
-        else:
-            timings["Enrichment"] = 0.0
-            # Ensure chunks are generated even if enrichment is disabled, for embeddings
-            result.chunks = self.enricher.chunk_text(result.text)
-        
-        # 5. Validation
-        if self.config.use_validation:
-            t0 = time.time()
-            self.validator.validate(result)
-            timings["Validation"] = time.time() - t0
-            logger.info(f"  [Pipeline] Validation done ({timings['Validation']:.2f}s)")
-        else:
-            timings["Validation"] = 0.0
+        # Initialize result early for soft-fails
+        result = DocumentResult()
 
-        # 6. Advanced Analytics (ML & Metrics)
-        if self.config.use_analytics:
+        try:
+            # 1. Ingestion
             t0 = time.time()
-            try:
-                self.analytics.analyze(result)
+            file_bytes = DocumentIngestor.ingest(source)
+            result.metadata["source_size"] = len(file_bytes)
+            timings["Ingestion"] = time.time() - t0
+            logger.info(f"  [Pipeline] Ingestion done ({timings['Ingestion']:.2f}s)")
+            
+            # 2. Classification
+            t0 = time.time()
+            if self.config.extractor_mode == "digital_only":
+                is_digital = True
+            elif self.config.extractor_mode == "scanned_only":
+                is_digital = False
+            else:
+                is_digital = DocumentClassifier.is_digital_pdf(file_bytes)
+            
+            result.metadata["is_digital_pdf"] = is_digital
+            
+            extractor = self.digital_extractor if is_digital else self.scanned_extractor
+            timings["Classification"] = time.time() - t0
+            logger.info(f"  [Pipeline] Classification done ({timings['Classification']:.2f}s) - {'Digital' if is_digital else 'Scanned'}")
+            
+            # 3. Extraction
+            if self.config.enable_ocr:
+                t0 = time.time()
+                try:
+                    text, tables = extractor.extract(file_bytes)
+                    result.text = text
+                    result.tables = tables
+                    timings["Extraction"] = time.time() - t0
+                    logger.info(f"  [Pipeline] Extraction done ({timings['Extraction']:.2f}s) - {len(text)} chars, {len(tables)} tables")
+                except Exception as e:
+                    logger.error(f"  [Pipeline] Extraction failed: {e}")
+                    # Soft fail: continue with empty text if allowed, else raise?
+                    # For pipeline continuity, we continue but mark error
+                    result.metadata["extraction_error"] = str(e)
+            else:
+                timings["Extraction"] = 0.0
+
+            # 4. Enrichment (includes Chunking)
+            if self.config.enable_llm_enrichment:
+                t0 = time.time()
+                try:
+                    self.enrich(result)
+                    # Pull token usage from enricher
+                    if hasattr(self.enricher, 'token_usage'):
+                        result.token_usage.update(self.enricher.token_usage)
+                except Exception as e:
+                    logger.error(f"  [Pipeline] Enrichment failed: {e}")
+                    result.metadata["enrichment_error"] = str(e)
+
+                timings["Enrichment"] = time.time() - t0
+                logger.info(f"  [Pipeline] Enrichment done ({timings['Enrichment']:.2f}s)")
+            else:
+                timings["Enrichment"] = 0.0
+                # Ensure chunks are generated even if enrichment is disabled, for embeddings
+                result.chunks = self.enricher.chunk_text(result.text)
+            
+            # 5. Validation
+            if self.config.use_validation:
+                t0 = time.time()
+                self.validator.validate(result)
+                timings["Validation"] = time.time() - t0
+                logger.info(f"  [Pipeline] Validation done ({timings['Validation']:.2f}s)")
+            else:
+                timings["Validation"] = 0.0
+
+            # 6. Advanced Analytics (ML & Metrics)
+            if self.config.use_analytics:
+                t0 = time.time()
+                try:
+                    self.analytics.analyze(result)
+                    
+                    # Calculate Factuality Score (Proxy)
+                    if result.summary and result.chunks:
+                        overlap_score = 0.0
+                        summary_words = set(result.summary.lower().split())
+                        chunk_words = set(" ".join(result.chunks).lower().split())
+                        if chunk_words:
+                            overlap_score = len(summary_words.intersection(chunk_words)) / len(summary_words) if len(summary_words) > 0 else 0.0
+                        result.factuality_score = overlap_score
+
+                except Exception as e:
+                    logger.error(f"  [Pipeline] Analytics module failed completely: {e}")
+                timings["Analytics"] = time.time() - t0
+                logger.info(f"  [Pipeline] Analytics done ({timings['Analytics']:.2f}s)")
+            else:
+                timings["Analytics"] = 0.0
+            
+            # 7. Embedding & Storage
+            if self.config.enable_embeddings:
+                t0 = time.time()
+                try:
+                    self.embed_and_store(result)
+                except Exception as e:
+                    logger.error(f"  [Pipeline] Embedding failed: {e}")
+                timings["Embedding"] = time.time() - t0
+                logger.info(f"  [Pipeline] Embedding done ({timings['Embedding']:.2f}s)")
+            else:
+                timings["Embedding"] = 0.0
+        
+        except Exception as e:
+            logger.critical(f"  [Pipeline] Critical failure: {e}", exc_info=True)
+            result.metadata["critical_error"] = str(e)
+            
+        finally:
+            timings["Total"] = time.time() - t_start
+            result.processing_time_seconds = timings
+            result.runtime_metrics = timings
+            
+            # Cost Estimation
+            # Re-calculate based on actual tracked tokens + estimates
+            
+            # 1. LLM tokens from Enricher
+            input_tokens = result.token_usage.get("llm_input", 0)
+            output_tokens = result.token_usage.get("llm_output", 0)
+            
+            # 2. Embedding tokens (estimate if not tracked by provider, but OpenAI provider usually doesn't return usage easily in this simple impl)
+            # Estimate: 1 token ~= 4 chars
+            embedding_tokens = len(result.text) / 4 if result.text else 0
+            result.token_usage["embedding"] = int(embedding_tokens)
+            
+            # Pricing (gpt-3.5-turbo & ada-002)
+            cost = (input_tokens / 1_000_000 * 0.50) + (output_tokens / 1_000_000 * 1.50)
+            if self.config.enable_embeddings:
+                cost += (embedding_tokens / 1_000_000 * 0.10)
                 
-                # Calculate Factuality Score (Proxy)
-                # Check overlap between summary and text chunks
-                if result.summary and result.chunks:
-                    overlap_score = 0.0
-                    summary_words = set(result.summary.lower().split())
-                    chunk_words = set(" ".join(result.chunks).lower().split())
-                    if chunk_words:
-                        overlap_score = len(summary_words.intersection(chunk_words)) / len(summary_words) if len(summary_words) > 0 else 0.0
-                    result.factuality_score = overlap_score
-
-            except Exception as e:
-                logger.error(f"  [Pipeline] Analytics module failed completely: {e}")
-            timings["Analytics"] = time.time() - t0
-            logger.info(f"  [Pipeline] Analytics done ({timings['Analytics']:.2f}s)")
-        else:
-            timings["Analytics"] = 0.0
-        
-        # 7. Embedding & Storage
-        if self.config.enable_embeddings:
-            t0 = time.time()
-            try:
-                self.embed_and_store(result)
-            except Exception as e:
-                logger.error(f"  [Pipeline] Embedding failed: {e}")
-            timings["Embedding"] = time.time() - t0
-            logger.info(f"  [Pipeline] Embedding done ({timings['Embedding']:.2f}s)")
-        else:
-            timings["Embedding"] = 0.0
-        
-        timings["Total"] = time.time() - t_start
-        result.processing_time_seconds = timings
-        result.runtime_metrics = timings
-        
-        # Cost Estimation (Simple proxy based on token counts)
-        # Assuming gpt-3.5-turbo pricing: ~$0.50 / 1M input tokens, ~$1.50 / 1M output tokens
-        # 1 token ~= 4 chars
-        input_tokens = len(result.text) / 4
-        output_tokens = (len(result.summary or "") + len(str(result.entities or "")) + len(str(result.risk_analysis or ""))) / 4
-        
-        embedding_tokens = len(result.text) / 4 # embeddings-ada-002: $0.10 / 1M tokens
-        
-        cost = (input_tokens / 1_000_000 * 0.50) + (output_tokens / 1_000_000 * 1.50)
-        if self.config.enable_embeddings:
-            cost += (embedding_tokens / 1_000_000 * 0.10)
+            result.cost_estimate_usd = round(cost, 6)
             
-        result.cost_estimate_usd = round(cost, 6)
-        
-        logger.info(f"  [Pipeline] Finished. Total time: {timings['Total']:.2f}s. Est. Cost: ${cost:.6f}")
+            logger.info(f"  [Pipeline] Finished. Total time: {timings.get('Total', 0):.2f}s. Est. Cost: ${cost:.6f}")
 
         return result
 

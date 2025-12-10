@@ -42,10 +42,13 @@ class DocumentResult:
     # Evaluation & Cost Metrics
     runtime_metrics: Dict[str, float] = field(default_factory=dict)
     cost_estimate_usd: float = 0.0
+    token_usage: Dict[str, int] = field(default_factory=lambda: {"llm_input": 0, "llm_output": 0, "embedding": 0})
     factuality_score: float = 0.0 # Proxy for RAG faithfulness
     
     # Ground Truth Metrics (if available)
     ocr_cer: Optional[float] = None
     ocr_wer: Optional[float] = None
     table_accuracy: Optional[float] = None
-
+    
+    # Detailed Per-Page Metrics (for scalability analysis)
+    per_page_metrics: List[Dict[str, Any]] = field(default_factory=list)

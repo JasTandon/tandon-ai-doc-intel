@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import List, Dict, Iterable, Any
 import math
+import numpy as np
 
 # --- Basic Levenshtein distance (no extra dependency) ---
 def _levenshtein(a: str, b: str) -> int:
@@ -100,6 +101,41 @@ def mrr(results: List[List[str]], ground_truth: List[List[str]]) -> float:
             rr.append(1.0 / rank)
     return sum(rr) / len(rr) if rr else 0.0
 
+def ndcg_at_k(results: List[List[str]], ground_truth: List[List[str]], k: int) -> float:
+    """
+    Normalized Discounted Cumulative Gain at K.
+    Assumes binary relevance (1 if in ground_truth, 0 otherwise).
+    """
+    assert len(results) == len(ground_truth)
+    scores = []
+    
+    for res, rel in zip(results, ground_truth):
+        if not rel:
+            continue
+            
+        rel_set = set(rel)
+        dcg = 0.0
+        idcg = 0.0
+        
+        # Calculate DCG
+        for i, doc_id in enumerate(res[:k]):
+            if doc_id in rel_set:
+                # Binary relevance = 1
+                dcg += 1.0 / math.log2(i + 2)
+                
+        # Calculate IDCG (Ideal DCG)
+        # In ideal case, all relevant docs are at the top
+        num_relevant = len(rel_set)
+        for i in range(min(num_relevant, k)):
+            idcg += 1.0 / math.log2(i + 2)
+            
+        if idcg > 0:
+            scores.append(dcg / idcg)
+        else:
+            scores.append(0.0)
+            
+    return sum(scores) / len(scores) if scores else 0.0
+
 def evaluate_retrieval(
     queries: List[str],
     relevant_ids: List[List[str]],
@@ -111,23 +147,17 @@ def evaluate_retrieval(
     Simple wrapper that:
       - embeds each query,
       - runs vector_store.query(),
-      - computes Recall@k, Precision@k, and MRR.
+      - computes Recall@k, Precision@k, MRR, and nDCG@k.
     """
     all_results: List[List[str]] = []
     for q in queries:
         q_vec = embedder.embed_query(q)
-        # Assuming vector_store.query returns dict/object with 'ids' or list of matches
-        # This part might need adaptation based on actual VectorStore implementation
         hits = vector_store.query(q_vec, k=k) 
         
-        # Check return type of hits. If it's ChromaDB specific, it might be dict with 'ids'
         if isinstance(hits, dict) and 'ids' in hits:
-             # ChromaDB returns list of lists for ids if multiple queries, but here we query one by one
-             # If single query, it might be list of lists [["id1", "id2"]]
              ids = hits['ids'][0] if hits['ids'] else []
              all_results.append(ids)
         elif isinstance(hits, list):
-             # If it returns list of hit objects
              all_results.append([h.get("id") for h in hits])
         else:
              all_results.append([])
@@ -136,6 +166,7 @@ def evaluate_retrieval(
         "recall_at_k": recall_at_k(all_results, relevant_ids, k),
         "precision_at_k": precision_at_k(all_results, relevant_ids, k),
         "mrr": mrr(all_results, relevant_ids),
+        "ndcg_at_k": ndcg_at_k(all_results, relevant_ids, k)
     }
 
 # --- Cost & throughput (optional) ---
@@ -155,4 +186,3 @@ def compute_throughput(num_docs: int, total_seconds: float) -> float:
     if total_seconds <= 0:
         return 0.0
     return num_docs / total_seconds
-
