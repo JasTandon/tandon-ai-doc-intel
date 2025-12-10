@@ -45,15 +45,15 @@ pip install -e .
 
 ## Usage
 
-### 1. Run the Web Dashboard (Gradio)
-We recommend using the **Gradio** dashboard for a robust, interactive experience (especially if Streamlit has issues on your machine).
+### 1. Run the Web Dashboard (Dash)
+We recommend using the **Dash** dashboard for the best visual experience and advanced analytics.
 
 ```bash
-python gradio_app.py
+python dash_app.py
 ```
-Open **http://localhost:7860** in your browser.
+Open **http://127.0.0.1:8050** in your browser.
 
-*Note: The older Streamlit app (`app.py`) is also available but deprecated.*
+*Note: The older Streamlit (`app.py`) and Gradio (`gradio_app.py`) apps are available but deprecated.*
 
 ### 2. Use in Python Code
 
@@ -79,10 +79,25 @@ if result.tables:
 
 ---
 
-## Testing
+## Project Structure
 
-Run the unit tests to verify your installation:
+*   `src/tandon_ai_doc_intel/`: Core library package.
+    *   `pipeline.py`: Orchestrator for the entire flow.
+    *   `ingestion.py`: Handles file loading (paths, bytes).
+    *   `classification.py`: Detects digital vs. scanned PDFs.
+    *   `extraction/`: Modules for PyMuPDF (digital) and Tesseract (scanned).
+    *   `enrichment/`: LLM integration for summary, entities, and risk.
+    *   `analytics.py`: Advanced metrics (Readability, Sentiment, NLP).
+    *   `validation.py`: Quality assurance checks.
+    *   `embeddings/`: Vector generation and storage.
+*   `dash_app.py`: The main interactive web application.
+*   `app.py`: Legacy Streamlit app.
+*   `gradio_app.py`: Legacy Gradio app.
 
-```bash
-python -m unittest discover tests
-```
+## Contributing
+
+1.  Fork the repo.
+2.  Create your feature branch (`git checkout -b feature/amazing-feature`).
+3.  Commit your changes (`git commit -m 'Add some amazing feature'`).
+4.  Push to the branch (`git push origin feature/amazing-feature`).
+5.  Open a Pull Request.
