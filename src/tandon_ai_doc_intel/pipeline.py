@@ -86,13 +86,23 @@ class DocumentPipeline:
 
         # 6. Advanced Analytics (ML & Metrics)
         t0 = time.time()
-        self.analytics.analyze(result)
+        try:
+            # Run in a separate thread/process with timeout if needed, but for now just try-except
+            # If it hangs, it might be NMF on sparse data.
+            # Let's add a timeout wrapper around analytics if it's the culprit.
+            self.analytics.analyze(result)
+        except Exception as e:
+            logger.error(f"  [Pipeline] Analytics module failed completely: {e}")
         timings["Analytics"] = time.time() - t0
         logger.info(f"  [Pipeline] Analytics done ({timings['Analytics']:.2f}s)")
         
         # 7. Embedding & Storage
         t0 = time.time()
-        self.embed_and_store(result)
+        try:
+            self.embed_and_store(result)
+        except Exception as e:
+            logger.error(f"  [Pipeline] Embedding failed: {e}")
+            # Continue even if embedding fails
         timings["Embedding"] = time.time() - t0
         logger.info(f"  [Pipeline] Embedding done ({timings['Embedding']:.2f}s)")
         

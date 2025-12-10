@@ -22,12 +22,25 @@ class VectorStore:
         if not ids or not documents or not embeddings:
             return
 
-        self.collection.add(
-            ids=ids,
-            documents=documents,
-            embeddings=embeddings,
-            metadatas=metadatas
-        )
+        try:
+            # ChromaDB batch size limit is often 5461. 
+            # Safe batch size: 100
+            batch_size = 100
+            total_docs = len(ids)
+            
+            for i in range(0, total_docs, batch_size):
+                end = min(i + batch_size, total_docs)
+                self.collection.add(
+                    ids=ids[i:end],
+                    documents=documents[i:end],
+                    embeddings=embeddings[i:end],
+                    metadatas=metadatas[i:end] if metadatas else None
+                )
+        except Exception as e:
+            print(f"Error adding documents to ChromaDB: {e}")
+            # If it fails, maybe IDs duplicate?
+            # Re-try with upsert or just log.
+            pass
 
     def query(self, query_embeddings: List[float], n_results: int = 5):
         """

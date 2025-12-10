@@ -31,6 +31,15 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG, dbc.icons.BOO
                 background_callback_manager=background_callback_manager)
 app.title = "Tandon AI Doc Intel"
 
+import nltk
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+    nltk.download('brown')
+    nltk.download('wordnet')
+    nltk.download('averaged_perceptron_tagger')
+
 import logging
 import warnings
 
@@ -91,8 +100,12 @@ def parse_contents(contents, filename, api_key):
         logger.error(f"❌ Failed to process {filename}: {str(e)}", exc_info=True)
         return None, str(e)
     finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        # Extra robust cleanup to prevent stuck file handles
+        try:
+            if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 # --- Layout ---
 app.layout = dbc.Container([
@@ -204,44 +217,117 @@ def process_documents(set_progress, n_clicks, list_of_contents, list_of_names, a
         return no_update, "No files."
     
     results_data = []
-    total = len(list_of_contents)
     
-    for i, (c, n) in enumerate(zip(list_of_contents, list_of_names)):
-        # Update progress
-        percent = int(((i) / total) * 100)
+    # Pre-process: Decode all files to check properties
+    import fitz
+    
+    single_page_docs = []
+    multi_page_docs = []
+    
+    logger.info("Starting ingestion phase...")
+    
+    for c, n in zip(list_of_contents, list_of_names):
+        try:
+            content_type, content_string = c.split(',')
+            decoded = base64.b64decode(content_string)
+            
+            with fitz.open(stream=decoded, filetype="pdf") as doc:
+                page_count = len(doc)
+                
+            item = {"filename": n, "content": c, "pages": page_count}
+            if page_count == 1:
+                single_page_docs.append(item)
+            else:
+                multi_page_docs.append(item)
+        except Exception as e:
+            logger.error(f"Failed to check page count for {n}: {e}")
+            # Treat as multi-page (safe fallback)
+            multi_page_docs.append({"filename": n, "content": c, "pages": 1})
+
+    total_docs = len(single_page_docs) + len(multi_page_docs)
+    processed_count = 0
+    
+    # 1. Process Multi-Page Docs (One by One)
+    for doc in multi_page_docs:
+        percent = int((processed_count / total_docs) * 100) if total_docs > 0 else 0
         set_progress((str(percent), f"{percent}%"))
         
-        logger.info(f"Processing file {i+1}/{total}: {n}")
+        n = doc['filename']
+        c = doc['content']
+        logger.info(f"Processing Multi-Page Document: {n} ({doc['pages']} pages)")
+        
         res, err = parse_contents(c, n, api_key)
+        processed_count += 1
+        
+        # Always update progress after processing
+        percent = int((processed_count / total_docs) * 100) if total_docs > 0 else 0
+        set_progress((str(percent), f"{percent}%"))
+        
         if err:
             logger.error(f"Skipping {n} due to error: {err}")
-            continue # Skip errors for batch
+            continue
+            
+        results_data.append(_serialize_result(res))
+
+    # 2. Process Single-Page Docs (Batched in groups of 3)
+    batch_size = 3
+    for i in range(0, len(single_page_docs), batch_size):
+        batch = single_page_docs[i : i + batch_size]
         
-        # Serialize
-        results_data.append({
-            "filename": res.filename,
-            "timings": res.processing_time_seconds, # Full timing dict
-            "readability": res.readability_score,
-            "gunning_fog": res.gunning_fog,
-            "risk": res.risk_analysis.get("risk_level", "Unknown") if res.risk_analysis else "Unknown",
-            "risk_factors": res.risk_analysis.get("risk_factors", []) if res.risk_analysis else [],
-            "type": "Digital" if res.metadata.get("is_digital_pdf") else "Scanned",
-            "embeddings": res.embeddings,
-            "summary": res.summary,
-            "sentiment": res.sentiment_polarity,
-            "subjectivity": res.sentiment_subjectivity,
-            "lexical_diversity": res.lexical_diversity,
-            "topics": res.topics
-        })
-        
-        # Update progress after step
-        percent = int(((i + 1) / total) * 100)
+        percent = int((processed_count / total_docs) * 100) if total_docs > 0 else 0
         set_progress((str(percent), f"{percent}%"))
-    
-    if not results_data and total > 0:
+        
+        logger.info(f"Processing Batch of {len(batch)} Single-Page Docs: {[d['filename'] for d in batch]}")
+        
+        # Use ThreadPoolExecutor to process batch in parallel
+        import concurrent.futures
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
+            future_to_doc = {
+                executor.submit(parse_contents, d['content'], d['filename'], api_key): d 
+                for d in batch
+            }
+            
+            for future in concurrent.futures.as_completed(future_to_doc):
+                d = future_to_doc[future]
+                processed_count += 1
+                
+                # Update progress for each item in batch
+                percent = int((processed_count / total_docs) * 100) if total_docs > 0 else 0
+                set_progress((str(percent), f"{percent}%"))
+                
+                try:
+                    res, err = future.result()
+                    if err:
+                        logger.error(f"Error in batch for {d['filename']}: {err}")
+                    else:
+                        results_data.append(_serialize_result(res))
+                except Exception as e:
+                    logger.error(f"Crash in batch for {d['filename']}: {e}")
+
+    if not results_data and total_docs > 0:
          return [], "⚠️ All files failed. Check API Key or console logs."
 
+    # Final progress update to 100% ONLY after loop is done
+    set_progress(("100", "100%"))
     return results_data, "" # Clear loading text when done
+
+def _serialize_result(res):
+    return {
+        "filename": res.filename,
+        "timings": res.processing_time_seconds, # Full timing dict
+        "readability": res.readability_score,
+        "gunning_fog": res.gunning_fog,
+        "risk": res.risk_analysis.get("risk_level", "Unknown") if res.risk_analysis else "Unknown",
+        "risk_factors": res.risk_analysis.get("risk_factors", []) if res.risk_analysis else [],
+        "type": "Digital" if res.metadata.get("is_digital_pdf") else "Scanned",
+        "embeddings": res.embeddings,
+        "summary": res.summary,
+        "sentiment": res.sentiment_polarity,
+        "subjectivity": res.sentiment_subjectivity,
+        "lexical_diversity": res.lexical_diversity,
+        "topics": res.topics
+    }
 
 # 3. Update Global KPIs (Sidebar)
 @callback(
@@ -451,4 +537,3 @@ def update_inspector(selected_idx, data):
 
 if __name__ == "__main__":
     app.run(debug=True, port=8050)
-
