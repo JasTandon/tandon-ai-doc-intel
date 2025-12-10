@@ -38,8 +38,6 @@ class VectorStore:
                 )
         except Exception as e:
             print(f"Error adding documents to ChromaDB: {e}")
-            # If it fails, maybe IDs duplicate?
-            # Re-try with upsert or just log.
             pass
 
     def query(self, query_embeddings: List[float], n_results: int = 5):
@@ -51,3 +49,48 @@ class VectorStore:
             n_results=n_results
         )
 
+    def hybrid_search(self, query: str, query_embedding: List[float], n_results: int = 5) -> List[Dict[str, Any]]:
+        """
+        Performs a hybrid search combining vector similarity and basic keyword filtering.
+        Note: Since ChromaDB doesn't support full-text search native hybrid ranking easily, 
+        this implementation fetches a larger candidate set via vector search and re-ranks 
+        based on exact keyword presence in the chunk.
+        """
+        # 1. Fetch larger candidate set (2x n_results)
+        candidates = self.query(query_embedding, n_results=n_results * 2)
+        
+        if not candidates or not candidates['ids'] or not candidates['ids'][0]:
+            return []
+            
+        ids = candidates['ids'][0]
+        distances = candidates['distances'][0]
+        documents = candidates['documents'][0]
+        metadatas = candidates['metadatas'][0] if candidates['metadatas'] else [{}] * len(ids)
+        
+        # 2. Score candidates
+        # Base score = 1.0 - distance (Vector similarity)
+        # Bonus = 0.2 if query terms appear in text
+        
+        query_terms = set(query.lower().split())
+        scored_results = []
+        
+        for i in range(len(ids)):
+            text = documents[i].lower()
+            base_score = 1.0 - distances[i]
+            
+            # Simple term overlap bonus
+            term_matches = sum(1 for term in query_terms if term in text)
+            keyword_bonus = 0.1 * term_matches
+            
+            final_score = base_score + keyword_bonus
+            
+            scored_results.append({
+                "id": ids[i],
+                "score": final_score,
+                "text": documents[i],
+                "metadata": metadatas[i]
+            })
+            
+        # 3. Sort and truncate
+        scored_results.sort(key=lambda x: x["score"], reverse=True)
+        return scored_results[:n_results]

@@ -6,28 +6,47 @@ This library implements a modular, end-to-end pipeline for processing unstructur
 
 Designed for high-compliance environments (Engineering, Legal, Finance) where data accuracy and semantic understanding are critical.
 
-## Key Features
+## 🏗️ System Architecture
+
+```mermaid
+graph TD
+    A[Ingestion] --> B{Classification}
+    B -->|Digital PDF| C[PyMuPDF + Camelot]
+    B -->|Scanned PDF| D[Pre-processing + Tesseract OCR]
+    C --> E[Text & Table Stream]
+    D --> E
+    E --> F[Enrichment & Validation]
+    F -->|LLM| G[Summary, Entities, Risk]
+    F -->|Analytics| H[Readability, Sentiment, Factuality]
+    F --> I{Vector Store}
+    I -->|Embeddings| J[ChromaDB]
+    J --> K[Semantic Search & Retrieval]
+```
+
+---
+
+## 🚀 Key Features
 
 1.  **Intelligent Ingestion**: Automatically detects if a PDF is **Digital** (selectable text) or **Scanned** (image-based).
 2.  **Hybrid Extraction**:
     *   **Digital**: Uses `PyMuPDF` for high-fidelity text extraction and `Camelot` for structured tables.
-    *   **Scanned**: Routes through `Tesseract OCR` (pluggable with AWS/Azure) for image-to-text conversion.
-3.  **LLM Enrichment**: Uses OpenAI (or other providers) to:
+    *   **Scanned**: Routes through `Tesseract OCR` (pluggable with AWS/Azure) for image-to-text conversion. Includes **auto-deskewing** and **denoising**.
+3.  **LLM Enrichment**: Uses OpenAI to:
     *   Summarize content.
     *   Extract key entities (People, Orgs, Dates).
     *   Analyze potential Risks (Legal/Financial).
+    *   **Factuality Check**: Scores summary against source text to detect hallucinations.
 4.  **Quality Validation Loop**: Automatically scores extraction quality based on text density, OCR noise, and table confidence.
 5.  **Research-Grade Analytics**:
     *   **Readability**: Flesch Reading Ease, Gunning Fog Index.
     *   **Semantic**: Sentiment Analysis, Subjectivity, Lexical Diversity.
     *   **Clustering**: PCA & K-Means visualization of document embeddings.
-    *   **Factuality**: Proxy score measuring grounding of LLM summaries in source text.
-6.  **Vector Store Ready**: Generates embeddings (OpenAI) and stores chunked text in `ChromaDB` for semantic search.
-7.  **Benchmarking & Evaluation**: Includes tools for calculating CER/WER, Recall@k, and Precision@k against ground truth.
+6.  **Vector Store Ready**: Generates embeddings (OpenAI) and stores chunked text in `ChromaDB` for semantic search. Supports **Hybrid Search** (Keyword + Vector).
+7.  **Benchmarking & Evaluation**: Includes tools for calculating CER/WER, Recall@k, Precision@k, and nDCG against ground truth.
 
 ---
 
-## Installation
+## 📦 Installation
 
 ### Prerequisites
 *   Python 3.9+
@@ -45,7 +64,7 @@ pip install -e .
 
 ---
 
-## Usage
+## 🖥️ Usage
 
 ### 1. Run the Web Dashboard (Dash)
 We recommend using the **Dash** dashboard for the best visual experience and advanced analytics.
@@ -91,7 +110,7 @@ if result.tables:
 
 ---
 
-## Project Structure
+## 📂 Project Structure
 
 *   `src/tandon_ai_doc_intel/`: Core library package.
     *   `pipeline.py`: Orchestrator for the entire flow.
@@ -106,11 +125,11 @@ if result.tables:
     *   `evaluation.py`: Helper class for ground-truth comparison.
 *   `scripts/`: Utility scripts.
     *   `run_benchmarks.py`: Batch processing and evaluation script.
+*   `experiments/`: Directory for datasets and experiment configurations.
+*   `examples/`: Example notebooks and scripts.
 *   `dash_app.py`: The main interactive web application.
-*   `app.py`: Legacy Streamlit app.
-*   `gradio_app.py`: Legacy Gradio app.
 
-## Contributing
+## 🤝 Contributing
 
 1.  Fork the repo.
 2.  Create your feature branch (`git checkout -b feature/amazing-feature`).
