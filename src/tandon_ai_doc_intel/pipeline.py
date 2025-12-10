@@ -11,6 +11,9 @@ from .embeddings import OpenAIEmbeddings, VectorStore, EmbeddingsProvider
 from .validation import Validator
 from .analytics import AdvancedAnalytics
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DocumentPipeline:
     """
@@ -38,22 +41,27 @@ class DocumentPipeline:
         """
         timings = {}
         t_start = time.time()
+        
+        logger.info(f"  [Pipeline] Starting processing...")
 
         # 1. Ingestion
         t0 = time.time()
         file_bytes = DocumentIngestor.ingest(source)
         timings["Ingestion"] = time.time() - t0
+        logger.info(f"  [Pipeline] Ingestion done ({timings['Ingestion']:.2f}s)")
         
         # 2. Classification
         t0 = time.time()
         is_digital = DocumentClassifier.is_digital_pdf(file_bytes)
         extractor = self.digital_extractor if is_digital else self.scanned_extractor
         timings["Classification"] = time.time() - t0
+        logger.info(f"  [Pipeline] Classification done ({timings['Classification']:.2f}s) - {'Digital' if is_digital else 'Scanned'}")
         
         # 3. Extraction
         t0 = time.time()
         text, tables = extractor.extract(file_bytes)
         timings["Extraction"] = time.time() - t0
+        logger.info(f"  [Pipeline] Extraction done ({timings['Extraction']:.2f}s) - {len(text)} chars, {len(tables)} tables")
         
         result = DocumentResult(
             text=text,
@@ -68,24 +76,29 @@ class DocumentPipeline:
         t0 = time.time()
         self.enrich(result)
         timings["Enrichment"] = time.time() - t0
+        logger.info(f"  [Pipeline] Enrichment done ({timings['Enrichment']:.2f}s)")
         
         # 5. Validation
         t0 = time.time()
         self.validator.validate(result)
         timings["Validation"] = time.time() - t0
+        logger.info(f"  [Pipeline] Validation done ({timings['Validation']:.2f}s)")
 
         # 6. Advanced Analytics (ML & Metrics)
         t0 = time.time()
         self.analytics.analyze(result)
         timings["Analytics"] = time.time() - t0
+        logger.info(f"  [Pipeline] Analytics done ({timings['Analytics']:.2f}s)")
         
         # 7. Embedding & Storage
         t0 = time.time()
         self.embed_and_store(result)
         timings["Embedding"] = time.time() - t0
+        logger.info(f"  [Pipeline] Embedding done ({timings['Embedding']:.2f}s)")
         
         timings["Total"] = time.time() - t_start
         result.processing_time_seconds = timings
+        logger.info(f"  [Pipeline] Finished. Total time: {timings['Total']:.2f}s")
 
         return result
 
@@ -133,6 +146,10 @@ class DocumentPipeline:
         # Generate embeddings
         embeddings_list = self.embedding_provider.embed(result.chunks)
         
+        if not embeddings_list:
+            # Fallback if no embeddings generated (e.g. no API key)
+            return
+
         # Store flat list of embeddings? 
         # The result object has `embeddings` field which implies maybe one per document or list of them.
         # Let's store the MEAN embedding or just the list. The Type is List[float] (single vector) or List[List[float]]?

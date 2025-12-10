@@ -16,6 +16,19 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from openai import OpenAI
 from tandon_ai_doc_intel import DocumentPipeline
 
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("app_debug.log")
+    ]
+)
+logger = logging.getLogger(__name__)
+
 st.set_page_config(
     page_title="Tandon AI Doc Intel",
     page_icon="📄",
@@ -102,16 +115,20 @@ def main():
             st.session_state.last_uploaded_filenames = current_filenames
 
     if uploaded_files and st.button("Analyze Documents"):
+        logger.info(f"Starting analysis for {len(uploaded_files)} documents")
         if not api_key:
             st.error("OpenAI API Key is required for the full pipeline.")
+            logger.error("Analysis failed: Missing OpenAI API Key")
             return
             
         if len(uploaded_files) > 100:
             st.error("Maximum 100 files allowed.")
+            logger.warning("Analysis aborted: Too many files uploaded")
             return
 
         with st.spinner("Initializing Pipeline..."):
             pipeline = DocumentPipeline(openai_api_key=api_key)
+            logger.info("Pipeline initialized")
 
         results = []
         progress_bar = st.progress(0)
@@ -124,6 +141,7 @@ def main():
         for i in range(0, total_files, batch_size):
             batch = uploaded_files[i : i + batch_size]
             status_text.text(f"Processing batch {i//batch_size + 1} ({len(batch)} files)...")
+            logger.info(f"Processing batch {i//batch_size + 1}")
             
             for file_idx, uploaded_file in enumerate(batch):
                 # Update progress
@@ -136,10 +154,13 @@ def main():
                     tmp_path = tmp_file.name
                 
                 try:
+                    logger.info(f"Processing file: {uploaded_file.name}")
                     result = pipeline.process(tmp_path)
                     result.filename = uploaded_file.name # Add filename to result for display
                     results.append(result)
+                    logger.info(f"Successfully processed: {uploaded_file.name}")
                 except Exception as e:
+                    logger.error(f"Error processing {uploaded_file.name}: {e}", exc_info=True)
                     st.error(f"Error processing {uploaded_file.name}: {e}")
                 finally:
                     if os.path.exists(tmp_path):
@@ -148,6 +169,7 @@ def main():
         progress_bar.progress(100)
         status_text.empty()
         st.success("Processing Complete!")
+        logger.info("Batch processing complete")
         
         # Store in Session State
         st.session_state.results = results

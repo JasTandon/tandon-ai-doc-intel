@@ -2,8 +2,37 @@ import fitz
 import tempfile
 import os
 import shutil
+import logging
+import multiprocessing
+import queue
 from typing import Tuple, List, Dict, Any
 from .base import BaseExtractor
+
+logger = logging.getLogger(__name__)
+
+def _run_camelot_process(file_path: str, result_queue: multiprocessing.Queue):
+    """
+    Worker function to run Camelot in a separate process.
+    """
+    import camelot
+    try:
+        # Run Camelot
+        tables = camelot.read_pdf(file_path, pages='all', flavor='lattice')
+        
+        # Serialize data
+        data = []
+        for t in tables:
+            data.append({
+                "page": t.page,
+                "accuracy": t.accuracy,
+                "whitespace": t.whitespace,
+                "data": t.df.to_dict(orient="records"),
+                "_bbox": getattr(t, "_bbox", None)
+            })
+        result_queue.put({"success": True, "data": data})
+        
+    except Exception as e:
+        result_queue.put({"success": False, "error": str(e)})
 
 class DigitalPDFExtractor(BaseExtractor):
     """
@@ -11,6 +40,7 @@ class DigitalPDFExtractor(BaseExtractor):
     """
     
     def extract(self, file_bytes: bytes) -> Tuple[str, List[Dict[str, Any]]]:
+        logger.info("    [DigitalExtractor] Starting text extraction...")
         full_text = []
         tables = [] 
         
@@ -19,55 +49,56 @@ class DigitalPDFExtractor(BaseExtractor):
             for page in doc:
                 text = page.get_text()
                 full_text.append(text)
+        logger.info(f"    [DigitalExtractor] Text extraction done. Found {len(full_text)} pages.")
         
-        # Table Extraction with Camelot
-        # Camelot requires a file path, so we write to a temp file
+        # Table Extraction with Camelot (in separate process with timeout)
+        logger.info("    [DigitalExtractor] Starting table extraction (Camelot)...")
+        
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_pdf:
+            temp_pdf.write(file_bytes)
+            temp_path = temp_pdf.name
+        
         try:
-            import camelot
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_pdf:
-                temp_pdf.write(file_bytes)
-                temp_path = temp_pdf.name
+            q = multiprocessing.Queue()
+            p = multiprocessing.Process(target=_run_camelot_process, args=(temp_path, q))
+            p.start()
             
-            try:
-                # 'stream' flavor is good for whitespace-separated tables
-                # 'lattice' is good for tables with grid lines
-                # We try 'lattice' first as it is more precise for forms.
-                camelot_tables = camelot.read_pdf(temp_path, pages='all', flavor='lattice')
-                
-                raw_tables = []
-                for table in camelot_tables:
-                    # Capture bbox for overlap detection: (x1, y1, x2, y2)
-                    # Camelot table._bbox is usually [x1, y1, x2, y2] in PDF coords (bottom-left origin)
-                    # We store it for post-processing.
-                    raw_tables.append({
-                        "page": table.page,
-                        "accuracy": table.accuracy,
-                        "whitespace": table.whitespace,
-                        "data": table.df.to_dict(orient="records"),
-                        "df": table.df,
-                        "_bbox": getattr(table, "_bbox", None) 
-                    })
-                
-                # Deduplicate / Clean Tables
-                cleaned_tables = self._post_process_tables(raw_tables)
-                
-                for i, table in enumerate(cleaned_tables):
-                    tables.append({
-                        "index": i,
-                        "page": table["page"],
-                        "accuracy": table["accuracy"],
-                        "whitespace": table["whitespace"],
-                        "data": table["data"]
-                    })
-                    
-            except Exception as e:
-                print(f"Camelot table extraction failed: {e}")
-            finally:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                    
-        except ImportError:
-            print("Camelot not installed. Skipping table extraction.")
+            # Wait for 30 seconds max
+            p.join(timeout=30)
+            
+            if p.is_alive():
+                logger.warning("    [DigitalExtractor] Camelot timed out! Terminating process.")
+                p.terminate()
+                p.join()
+                # Proceed without tables
+            else:
+                if not q.empty():
+                    res = q.get()
+                    if res["success"]:
+                        raw_tables = res["data"]
+                        logger.info(f"    [DigitalExtractor] Camelot found {len(raw_tables)} tables.")
+                        
+                        # Deduplicate / Clean Tables
+                        cleaned_tables = self._post_process_tables(raw_tables)
+                        
+                        for i, table in enumerate(cleaned_tables):
+                            tables.append({
+                                "index": i,
+                                "page": table["page"],
+                                "accuracy": table["accuracy"],
+                                "whitespace": table["whitespace"],
+                                "data": table["data"]
+                            })
+                    else:
+                         logger.error(f"    [DigitalExtractor] Camelot worker error: {res['error']}")
+                else:
+                    logger.warning("    [DigitalExtractor] Camelot finished but returned no data.")
+
+        except Exception as e:
+            logger.error(f"    [DigitalExtractor] Table extraction wrapper failed: {e}")
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
             
         return "\n".join(full_text), tables
 

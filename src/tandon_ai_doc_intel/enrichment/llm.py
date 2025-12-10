@@ -38,8 +38,13 @@ class LLMEnricher:
         """
         Generates a summary of the text.
         """
-        if not self.client or not text:
-            return "LLM not configured or empty text."
+        if not text:
+            return ""
+
+        if not self.client:
+            # Fallback: Return first 500 characters or first 3 lines
+            lines = [l for l in text.splitlines() if l.strip()]
+            return " ".join(lines[:3]) if lines else text[:500] + "..."
             
         # For long text, we might need to summarize chunks and then map-reduce, 
         # but for this MVP we'll take the first chunk or truncate.
@@ -62,8 +67,11 @@ class LLMEnricher:
         """
         Extracts named entities (people, organizations, dates, locations).
         """
-        if not self.client or not text:
+        if not text:
             return []
+            
+        if not self.client:
+            return [] # Return empty list if no LLM
             
         truncated_text = text[:4000]
         prompt = (
@@ -96,8 +104,11 @@ class LLMEnricher:
         """
         Analyzes potential risks in the document.
         """
-        if not self.client or not text:
+        if not text:
             return {}
+
+        if not self.client:
+            return {"risk_level": "Unknown", "risk_factors": ["LLM not configured"]}
             
         truncated_text = text[:4000]
         prompt = (
