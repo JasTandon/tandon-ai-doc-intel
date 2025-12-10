@@ -584,7 +584,7 @@ def update_inspector(selected_idx, data, api_key):
             dbc.ListGroupItem(
                 html.Div([
                     html.Span("🔢 Token Usage: "),
-                    html.Span(f"In: {doc.get('token_usage', {}).get('llm_input', 0)} | Out: {doc.get('token_usage', {}).get('llm_output', 0)}", className="text-muted ms-1")
+                    html.Span(f"In: {doc.get('token_usage', {}).get('llm_input', 0)} | Out: {doc.get('token_usage', {}).get('llm_output', 0)}", className="text-info ms-2 fw-bold")
                 ]), 
                 className="bg-dark text-light"
             ),

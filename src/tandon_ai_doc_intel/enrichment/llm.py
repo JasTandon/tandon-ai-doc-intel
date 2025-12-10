@@ -36,6 +36,33 @@ class LLMEnricher:
         chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
         return chunks
 
+    def _completion_with_fallback(self, messages: List[Dict[str, str]], **kwargs):
+        """
+        Tries to use gpt-5.1 (as requested), falls back to gpt-4o on failure.
+        """
+        try:
+            # Prepare kwargs for the primary model (gpt-5.1)
+            # Newer models often require 'max_completion_tokens' instead of 'max_tokens'
+            primary_kwargs = kwargs.copy()
+            if "max_tokens" in primary_kwargs:
+                primary_kwargs["max_completion_tokens"] = primary_kwargs.pop("max_tokens")
+
+            # Try user-requested model first
+            return self.client.chat.completions.create(
+                model="gpt-5.1",
+                messages=messages,
+                **primary_kwargs
+            )
+        except Exception as e:
+            # Fallback to gpt-4o if gpt-5.1 fails (likely due to non-existence, access issues, or param mismatch)
+            logger.warning(f"GPT-5.1 failed ({str(e)}), falling back to GPT-4o")
+            # Fallback uses the original kwargs (with max_tokens if present)
+            return self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                **kwargs
+            )
+
     def summarize(self, text: str) -> str:
         """
         Generates a summary of the document.
@@ -50,13 +77,10 @@ class LLMEnricher:
             cached = self.cache.get(key)
             if cached:
                 logger.info("Enrichment: Using cached summary.")
-                # We don't track tokens for cached hits? Or should we estimate saved tokens?
-                # For cost estimation, we shouldn't count them.
                 return cached
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+            response = self._completion_with_fallback(
                 messages=[
                     {"role": "system", "content": "Summarize the following document concisely."},
                     {"role": "user", "content": truncated_text}
@@ -100,8 +124,7 @@ class LLMEnricher:
             Return a Python list of dictionaries like [{"text": "Entity Name", "label": "ORG/PERSON/DATE"}].
             Only return the list, no other text.
             """
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+            response = self._completion_with_fallback(
                 messages=[
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": truncated_text}
@@ -155,8 +178,7 @@ class LLMEnricher:
             - "risk_level": "Low", "Medium", or "High"
             - "risk_factors": List[str] of specific risks identified.
             """
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+            response = self._completion_with_fallback(
                 messages=[
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": truncated_text}
