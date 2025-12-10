@@ -21,7 +21,9 @@ Designed for high-compliance environments (Engineering, Legal, Finance) where da
     *   **Readability**: Flesch Reading Ease, Gunning Fog Index.
     *   **Semantic**: Sentiment Analysis, Subjectivity, Lexical Diversity.
     *   **Clustering**: PCA & K-Means visualization of document embeddings.
+    *   **Factuality**: Proxy score measuring grounding of LLM summaries in source text.
 6.  **Vector Store Ready**: Generates embeddings (OpenAI) and stores chunked text in `ChromaDB` for semantic search.
+7.  **Benchmarking & Evaluation**: Includes tools for calculating CER/WER, Recall@k, and Precision@k against ground truth.
 
 ---
 
@@ -55,7 +57,17 @@ Open **http://127.0.0.1:8050** in your browser.
 
 *Note: The older Streamlit (`app.py`) and Gradio (`gradio_app.py`) apps are available but deprecated.*
 
-### 2. Use in Python Code
+### 2. Run Research Benchmarks
+For benchmarking extraction quality (CER/WER) and retrieval performance (Recall@k):
+
+```bash
+python scripts/run_benchmarks.py \
+    --data-dir ./data/test_corpus \
+    --output-csv results.csv \
+    --api-key sk-your-key
+```
+
+### 3. Use in Python Code
 
 ```python
 import os
@@ -90,6 +102,10 @@ if result.tables:
     *   `analytics.py`: Advanced metrics (Readability, Sentiment, NLP).
     *   `validation.py`: Quality assurance checks.
     *   `embeddings/`: Vector generation and storage.
+    *   `metrics.py`: Calculation of CER, WER, and Retrieval metrics.
+    *   `evaluation.py`: Helper class for ground-truth comparison.
+*   `scripts/`: Utility scripts.
+    *   `run_benchmarks.py`: Batch processing and evaluation script.
 *   `dash_app.py`: The main interactive web application.
 *   `app.py`: Legacy Streamlit app.
 *   `gradio_app.py`: Legacy Gradio app.
