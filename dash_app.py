@@ -330,7 +330,11 @@ def _serialize_result(res):
         "topics": res.topics,
         "info_density": res.info_density,
         "entity_density": res.entity_density,
-        "sentence_complexity": res.sentence_complexity
+        "sentence_complexity": res.sentence_complexity,
+        "cost_estimate": res.cost_estimate_usd,
+        "factuality_score": res.factuality_score,
+        "ocr_cer": res.ocr_cer,
+        "ocr_wer": res.ocr_wer
     }
 
 # 3. Update Global KPIs (Sidebar)
@@ -551,6 +555,26 @@ def update_inspector(selected_idx, data, api_key):
             className="text-light small fst-italic"
         )
     ], className="mb-3 bg-dark border-info"),
+
+    # Evaluation Metrics Card
+    dbc.Card([
+        dbc.CardHeader("📑 Research Paper Metrics", className="text-light"),
+        dbc.ListGroup([
+            dbc.ListGroupItem(f"💰 Est. Cost: ${doc.get('cost_estimate', 0.0):.6f}", className="bg-dark text-light"),
+            dbc.ListGroupItem(f"✅ Factuality Score: {doc.get('factuality_score', 0.0):.2f}", className="bg-dark text-light", id="tooltip-factuality"),
+            # Only show CER/WER if they exist (not None)
+            *(
+                [dbc.ListGroupItem(f"📉 OCR CER: {doc.get('ocr_cer'):.4f}", className="bg-dark text-light")]
+                if doc.get('ocr_cer') is not None else []
+            ),
+            *(
+                [dbc.ListGroupItem(f"📉 OCR WER: {doc.get('ocr_wer'):.4f}", className="bg-dark text-light")]
+                if doc.get('ocr_wer') is not None else []
+            ),
+        ], flush=True),
+        dbc.Tooltip("Proxy measure: Overlap between summary and source chunks.", target="tooltip-factuality"),
+    ], className="mb-3 bg-dark border-primary"),
+
 
                 dcc.Graph(figure=fig_time)
             ], width=6)
