@@ -32,6 +32,12 @@ dependencies = [
     "textstat",
     "scikit-learn",
     "textblob",
+    "nltk",
+    "dash",
+    "dash-bootstrap-components",
+    "diskcache",
+    "psutil",
+    "multiprocess",
 ]
 
 [project.optional-dependencies]

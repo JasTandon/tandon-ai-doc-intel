@@ -151,6 +151,32 @@ class AdvancedAnalytics:
         except Exception as e:
             logger.warning(f"    [Analytics] Topic modeling failed: {e}")
 
+        # 6. Technical Metrics (Information Density, Sentence Complexity)
+        if blob:
+            try:
+                # Information Density: Ratio of non-stop words to total words
+                # Approximation using simple length check if stopwords not loaded
+                # Let's use word length > 3 as simple heuristic for "content" words
+                total_words = len(blob.words)
+                if total_words > 0:
+                    long_words = [w for w in blob.words if len(w) > 3]
+                    result.info_density = len(long_words) / total_words
+                
+                # Entity Density: We need entities from result.entities
+                if result.entities and total_words > 0:
+                    result.entity_density = len(result.entities) / total_words
+                
+                # Sentence Complexity: Std Dev of sentence length
+                sentences = blob.sentences
+                if len(sentences) > 1:
+                    lengths = [len(s.words) for s in sentences]
+                    result.sentence_complexity = float(np.std(lengths))
+                elif len(sentences) == 1:
+                    result.sentence_complexity = 0.0
+                    
+            except Exception as e:
+                logger.warning(f"    [Analytics] Technical metrics failed: {e}")
+
         logger.info("    [Analytics] Analysis complete.")
         return result
 

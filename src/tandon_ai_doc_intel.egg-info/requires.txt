@@ -13,6 +13,12 @@ pandas
 textstat
 scikit-learn
 textblob
+nltk
+dash
+dash-bootstrap-components
+diskcache
+psutil
+multiprocess
 
 [dev]
 pytest

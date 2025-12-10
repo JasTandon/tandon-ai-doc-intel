@@ -61,7 +61,8 @@ def get_ai_insight(context_data, analysis_type, api_key):
     prompts = {
         "pipeline": f"Analyze these pipeline latencies (seconds): {context_data}. Identify bottlenecks.",
         "risk": f"Review this risk distribution: {context_data}. Summarize the overall risk profile of the corpus.",
-        "cluster": f"Interpret these document clusters found via PCA/K-Means: {context_data}. Suggest potential thematic groupings."
+        "cluster": f"Interpret these document clusters found via PCA/K-Means: {context_data}. Suggest potential thematic groupings.",
+        "technical": f"Interpret these technical text metrics: {context_data}. Explain what they imply about the document's structure and density."
     }
     
     try:
@@ -326,7 +327,10 @@ def _serialize_result(res):
         "sentiment": res.sentiment_polarity,
         "subjectivity": res.sentiment_subjectivity,
         "lexical_diversity": res.lexical_diversity,
-        "topics": res.topics
+        "topics": res.topics,
+        "info_density": res.info_density,
+        "entity_density": res.entity_density,
+        "sentence_complexity": res.sentence_complexity
     }
 
 # 3. Update Global KPIs (Sidebar)
@@ -374,7 +378,7 @@ def render_tabs(active_tab, data, api_key):
         # Readability vs Latency Scatter
         df['latency_total'] = df['timings'].apply(lambda x: x.get('Total', 0))
         fig_scatter = px.scatter(df, x="readability", y="latency_total", color="type", hover_data=["filename"], 
-                                 title="Complexity vs. Performance", template="plotly_dark")
+                                 title="Complexity vs. Performance (Digital=Native PDF, Scanned=OCR)", template="plotly_dark")
         
         # Pipeline Stage Breakdown (Avg)
         # Extract timings for all docs and average them
@@ -481,9 +485,10 @@ def render_tabs(active_tab, data, api_key):
 @callback(
     Output("inspector-content", "children"),
     Input("doc-selector", "value"),
-    State("stored-data", "data")
+    State("stored-data", "data"),
+    State("api-key", "value") # Include API key in state
 )
-def update_inspector(selected_idx, data):
+def update_inspector(selected_idx, data, api_key):
     if selected_idx is None or not data:
         return ""
     
@@ -496,7 +501,13 @@ def update_inspector(selected_idx, data):
     fig_time = px.bar(x=list(clean_timings.keys()), y=list(clean_timings.values()), 
                       title="Pipeline Execution Time (s)", template="plotly_dark",
                       labels={'x':'Stage', 'y':'Seconds'})
-    fig_time.update_layout(autosize=False, height=400) # Fix height expansion issue
+    
+    # Fix height expansion issue - Use fixed height layout
+    fig_time.update_layout(
+        autosize=False,
+        height=300, 
+        margin=dict(l=20, r=20, t=40, b=20)
+    )
     
     return html.Div([
         dbc.Row([
@@ -523,6 +534,24 @@ def update_inspector(selected_idx, data):
                     ], flush=True)
                 ], className="mb-3 bg-dark border-secondary"),
                 
+    # New Technical Metrics Card
+    dbc.Card([
+        dbc.CardHeader("🔬 Advanced ML Metrics", className="text-light"),
+        dbc.ListGroup([
+            dbc.ListGroupItem(f"Info Density: {doc.get('info_density', 0.0):.2f}", className="bg-dark text-light"),
+            dbc.ListGroupItem(f"Entity Density: {doc.get('entity_density', 0.0):.2f}", className="bg-dark text-light"),
+            dbc.ListGroupItem(f"Sentence Complexity (StdDev): {doc.get('sentence_complexity', 0.0):.2f}", className="bg-dark text-light"),
+        ], flush=True),
+        dbc.CardBody(
+            get_ai_insight({
+                "info_density": doc.get('info_density', 0), 
+                "entity_density": doc.get('entity_density', 0),
+                "complexity": doc.get('sentence_complexity', 0)
+            }, "technical", api_key) if api_key else "⚠️ OpenAI API Key required for technical insights.",
+            className="text-light small fst-italic"
+        )
+    ], className="mb-3 bg-dark border-info"),
+
                 dcc.Graph(figure=fig_time)
             ], width=6)
         ]),

@@ -34,3 +34,8 @@ class DocumentResult:
     gunning_fog: float = 0.0 
     automated_readability_index: float = 0.0
 
+    # Technical Metrics
+    info_density: float = 0.0 # Non-stop words / Total words
+    entity_density: float = 0.0 # Entities count / Total words
+    sentence_complexity: float = 0.0 # Std Dev of sentence length (proxy for structural variance)
+
