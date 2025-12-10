@@ -170,6 +170,7 @@ app.layout = dbc.Container([
             dbc.Tabs([
                 dbc.Tab(label="📈 Corpus Dashboard", tab_id="tab-1", label_style={"color": "#adb5bd"}, active_label_style={"color": "#fff", "fontWeight": "bold"}),
                 dbc.Tab(label="🤖 ML & Clusters", tab_id="tab-2", label_style={"color": "#adb5bd"}, active_label_style={"color": "#fff", "fontWeight": "bold"}),
+                dbc.Tab(label="🔎 Retrieval Lab", tab_id="tab-4", label_style={"color": "#adb5bd"}, active_label_style={"color": "#fff", "fontWeight": "bold"}),
                 dbc.Tab(label="🔍 Individual Inspector", tab_id="tab-3", label_style={"color": "#adb5bd"}, active_label_style={"color": "#fff", "fontWeight": "bold"}),
             ], id="tabs", active_tab="tab-1", className="mb-3"),
             
@@ -348,13 +349,16 @@ def update_kpis(data):
     
     df = pd.DataFrame(data)
     avg_latency = df['timings'].apply(lambda x: x.get('Total', 0)).mean()
+    total_processing_time = df['timings'].apply(lambda x: x.get('Total', 0)).sum()
     avg_readability = df['readability'].mean()
     high_risk = len(df[df['risk'] == 'High'])
+    throughput = len(df) / total_processing_time if total_processing_time > 0 else 0.0
     
     return html.Div([
         html.H6(f"Docs Processed: {len(df)}"),
         html.Hr(className="my-2"),
         html.P(f"⏱ Avg Latency: {avg_latency:.2f}s"),
+        html.P(f"⚡ Throughput: {throughput:.2f} docs/s"),
         html.P(f"📖 Avg Readability: {avg_readability:.1f}"),
         html.P(f"⚠️ High Risk Docs: {high_risk}", className="text-danger" if high_risk > 0 else "text-success")
     ])
@@ -466,6 +470,24 @@ def render_tabs(active_tab, data, api_key):
                 ], width=4)
             ])
         ])
+
+    elif active_tab == "tab-4":
+        # --- RETRIEVAL LAB ---
+        return html.Div([
+            dbc.Row([
+                dbc.Col([
+                    html.H4("🔎 Semantic Search & Retrieval Lab", className="text-light mb-4"),
+                    html.P("Test the vector store retrieval capabilities. Note: Formal metrics (Recall@k, MRR) require ground truth queries and should be run via the CLI benchmarking script.", className="text-muted mb-4"),
+                    
+                    dbc.InputGroup([
+                        dbc.Input(id="search-query", placeholder="Enter semantic query (e.g., 'financial risks in Q3')...", type="text"),
+                        dbc.Button("Search", id="btn-search", color="primary")
+                    ], className="mb-4"),
+                    
+                    dbc.Spinner(html.Div(id="search-results"), color="light", size="sm")
+                ], width=8, className="mx-auto")
+            ])
+        ])
     
     elif active_tab == "tab-3":
         # --- INSPECTOR ---
@@ -562,14 +584,15 @@ def update_inspector(selected_idx, data, api_key):
         dbc.ListGroup([
             dbc.ListGroupItem(f"💰 Est. Cost: ${doc.get('cost_estimate', 0.0):.6f}", className="bg-dark text-light"),
             dbc.ListGroupItem(f"✅ Factuality Score: {doc.get('factuality_score', 0.0):.2f}", className="bg-dark text-light", id="tooltip-factuality"),
-            # Only show CER/WER if they exist (not None)
-            *(
-                [dbc.ListGroupItem(f"📉 OCR CER: {doc.get('ocr_cer'):.4f}", className="bg-dark text-light")]
-                if doc.get('ocr_cer') is not None else []
+            
+            # OCR Metrics (CER/WER) - Show N/A if not available
+            dbc.ListGroupItem(
+                f"📉 OCR CER: {doc.get('ocr_cer'):.4f}" if doc.get('ocr_cer') is not None else "📉 OCR CER: N/A (No Ground Truth)", 
+                className="bg-dark text-light"
             ),
-            *(
-                [dbc.ListGroupItem(f"📉 OCR WER: {doc.get('ocr_wer'):.4f}", className="bg-dark text-light")]
-                if doc.get('ocr_wer') is not None else []
+            dbc.ListGroupItem(
+                f"📉 OCR WER: {doc.get('ocr_wer'):.4f}" if doc.get('ocr_wer') is not None else "📉 OCR WER: N/A (No Ground Truth)", 
+                className="bg-dark text-light"
             ),
         ], flush=True),
         dbc.Tooltip("Proxy measure: Overlap between summary and source chunks.", target="tooltip-factuality"),
@@ -590,3 +613,67 @@ def update_inspector(selected_idx, data, api_key):
 
 if __name__ == "__main__":
     app.run(debug=True, port=8050)
+
+# 6. Retrieval Callback
+@callback(
+    Output("search-results", "children"),
+    Input("btn-search", "n_clicks"),
+    State("search-query", "value"),
+    State("stored-data", "data"),
+    State("api-key", "value"),
+    prevent_initial_call=True
+)
+def run_retrieval(n_clicks, query, data, api_key):
+    if not query or not api_key:
+        return html.Div("Please enter a query and ensure API Key is set.", className="text-warning")
+    
+    # We need to rebuild a temporary vector store from the stored data
+    # because we don't have a persistent server-side vector store in this simple app demo.
+    # In a real app, this would query ChromaDB directly.
+    
+    from tandon_ai_doc_intel.embeddings import OpenAIEmbeddings
+    from sklearn.metrics.pairwise import cosine_similarity
+    
+    try:
+        # 1. Embed Query
+        client = OpenAI(api_key=api_key)
+        resp = client.embeddings.create(input=query, model="text-embedding-ada-002")
+        query_vec = resp.data[0].embedding
+        
+        # 2. Brute-force search over stored document embeddings (doc-level) 
+        # Note: Ideally we search chunks, but we only stored doc-level average embeddings in 'stored-data' to save space.
+        # For a better demo, we should have stored chunks. 
+        # But 'stored-data' has 'embeddings' field which is doc-level.
+        
+        results = []
+        for d in data:
+            if d.get('embeddings'):
+                score = cosine_similarity([query_vec], [d['embeddings']])[0][0]
+                results.append((score, d))
+        
+        # Sort by score
+        results.sort(key=lambda x: x[0], reverse=True)
+        top_k = results[:5]
+        
+        if not top_k:
+            return html.Div("No embeddings found in processed documents.", className="text-muted")
+            
+        cards = []
+        for score, doc in top_k:
+            cards.append(
+                dbc.Card([
+                    dbc.CardHeader(html.Div([
+                        html.Strong(doc['filename']),
+                        html.Badge(f"{score:.4f}", color="info", className="ms-2")
+                    ], className="d-flex justify-content-between align-items-center"), className="text-light"),
+                    dbc.CardBody([
+                        html.P(doc['summary'][:200] + "..." if doc['summary'] else "No summary available.", className="text-light small")
+                    ])
+                ], className="mb-2 bg-dark border-secondary")
+            )
+            
+        return html.Div(cards)
+        
+    except Exception as e:
+        return html.Div(f"Retrieval Error: {str(e)}", className="text-danger")
+
