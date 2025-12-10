@@ -41,8 +41,9 @@ graph TD
     *   **Readability**: Flesch Reading Ease, Gunning Fog Index.
     *   **Semantic**: Sentiment Analysis, Subjectivity, Lexical Diversity.
     *   **Clustering**: PCA & K-Means visualization of document embeddings.
-6.  **Vector Store Ready**: Generates embeddings (OpenAI) and stores chunked text in `ChromaDB` for semantic search. Supports **Hybrid Search** (Keyword + Vector).
-7.  **Benchmarking & Evaluation**: Includes tools for calculating CER/WER, Recall@k, Precision@k, and nDCG against ground truth.
+6.  **Vector Store Ready**: Generates embeddings (OpenAI) and stores chunked text in `ChromaDB` for semantic search. Supports **Hybrid Search** (Keyword + Vector) using **Reciprocal Rank Fusion (RRF)** combined with `rank_bm25`.
+7.  **Benchmarking & Evaluation**: Includes tools for calculating CER/WER, Recall@k, Precision@k, and nDCG against ground truth. Support for **Dataset Manifests** and **Aggregated Reporting**.
+8.  **Cost & Token Tracking**: Detailed tracking of LLM token usage (Input/Output) and cost estimation per document.
 
 ---
 
@@ -77,16 +78,28 @@ Open **http://127.0.0.1:8050** in your browser.
 *Note: The older Streamlit (`app.py`) and Gradio (`gradio_app.py`) apps are available but deprecated.*
 
 ### 2. Run Research Benchmarks
-For benchmarking extraction quality (CER/WER) and retrieval performance (Recall@k):
+For benchmarking extraction quality (CER/WER) and retrieval performance (Recall@k) using a dataset manifest:
 
 ```bash
 python scripts/run_benchmarks.py \
     --data-dir ./data/test_corpus \
+    --manifest ./experiments/dataset_manifest.json \
     --output-csv results.csv \
     --api-key sk-your-key
 ```
 
-### 3. Use in Python Code
+This will generate:
+*   `results.csv`: Per-document metrics.
+*   `results_summary.csv`: Aggregated statistics (Mean CER/WER, Cost, Throughput).
+*   `results_retrieval.csv`: Retrieval metrics (nDCG@k, MRR) if queries are provided.
+
+### 3. Interactive Notebooks
+Explore the library capabilities with our tutorial notebooks in `examples/`:
+
+*   [**01_pipeline_demo.ipynb**](examples/01_pipeline_demo.ipynb): Step-by-step walkthrough of the pipeline.
+*   [**02_hybrid_search_experiment.ipynb**](examples/02_hybrid_search_experiment.ipynb): Compare Vector Search vs. Hybrid Search (Vector + BM25).
+
+### 4. Use in Python Code
 
 ```python
 import os

@@ -39,6 +39,7 @@ dependencies = [
     "psutil",
     "multiprocess",
     "jiwer",
+    "rank_bm25",
 ]
 
 [project.optional-dependencies]

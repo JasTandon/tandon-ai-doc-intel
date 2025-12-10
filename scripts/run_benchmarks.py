@@ -178,9 +178,24 @@ def main() -> None:
         "throughput_docs_s": throughput,
         "total_cost_usd": total_cost,
         "mean_cost_per_doc": total_cost / len(rows) if rows else 0,
-        "mean_validation_score": sum(r.get("validation_score", 0) for r in rows) / len(rows),
-        "mean_readability": sum(r.get("readability", 0) for r in rows) / len(rows)
+        "mean_validation_score": sum(r.get("validation_score", 0) for r in rows) / len(rows) if rows else 0,
+        "mean_factuality_score": sum(r.get("factuality_score", 0) for r in rows) / len(rows) if rows else 0,
+        "mean_readability": sum(r.get("readability", 0) for r in rows) / len(rows) if rows else 0,
+        "mean_input_tokens": sum(r.get("input_tokens", 0) for r in rows) / len(rows) if rows else 0,
+        "mean_output_tokens": sum(r.get("output_tokens", 0) for r in rows) / len(rows) if rows else 0,
     }
+    
+    # Classification Accuracy
+    cls_correct = [r["classification_correct"] for r in rows if "classification_correct" in r]
+    if cls_correct:
+        agg_stats["classification_accuracy"] = sum(cls_correct) / len(cls_correct)
+
+    # Mean Latency per Stage
+    stages = ["time_Ingestion", "time_Classification", "time_Extraction", "time_Enrichment", "time_Embedding"]
+    for stage in stages:
+        values = [r.get(stage, 0) for r in rows if stage in r]
+        if values:
+            agg_stats[f"mean_{stage}"] = sum(values) / len(values)
     
     # Mean CER/WER if available
     cers = [r["cer"] for r in rows if "cer" in r]
@@ -194,7 +209,9 @@ def main() -> None:
     # Write Aggregated Stats
     agg_csv = output_csv.with_name(f"{output_csv.stem}_summary.csv")
     with agg_csv.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=agg_stats.keys())
+        # Pre-sort keys for consistent output
+        fieldnames = sorted(agg_stats.keys())
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerow(agg_stats)
     print(f"Wrote summary stats to {agg_csv}")

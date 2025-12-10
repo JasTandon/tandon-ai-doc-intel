@@ -480,7 +480,14 @@ def render_tabs(active_tab, data, api_key):
                     dbc.InputGroup([
                         dbc.Input(id="search-query", placeholder="Enter semantic query (e.g., 'financial risks in Q3')...", type="text"),
                         dbc.Button("Search", id="btn-search", color="primary")
-                    ], className="mb-4"),
+                    ], className="mb-2"),
+
+                    dbc.Switch(
+                        id="hybrid-search-toggle",
+                        label="Enable Hybrid Search (BM25 + Vector)",
+                        value=False,
+                        className="mb-4 text-light"
+                    ),
                     
                     dbc.Spinner(html.Div(id="search-results"), color="light", size="sm")
                 ], width=8, className="mx-auto")
@@ -624,11 +631,12 @@ if __name__ == "__main__":
     Output("search-results", "children"),
     Input("btn-search", "n_clicks"),
     State("search-query", "value"),
+    State("hybrid-search-toggle", "value"),
     State("stored-data", "data"),
     State("api-key", "value"),
     prevent_initial_call=True
 )
-def run_retrieval(n_clicks, query, data, api_key):
+def run_retrieval(n_clicks, query, use_hybrid, data, api_key):
     if not query or not api_key:
         return html.Div("Please enter a query and ensure API Key is set.", className="text-warning")
     
@@ -646,42 +654,63 @@ def run_retrieval(n_clicks, query, data, api_key):
         query_vec = query_vecs[0]
         
         # 3. Query Vector Store
-        results = vector_store.query(query_vec, n_results=5)
-        
-        # Results format: {'ids': [['id1', ...]], 'distances': [[0.1, ...]], 'documents': [['text', ...]], 'metadatas': [[{...}, ...]]}
-        
-        if not results or not results['ids'] or not results['ids'][0]:
-            return html.Div("No relevant documents found in local vector store.", className="text-muted")
+        if use_hybrid:
+            # Hybrid Search returns list of dicts with 'score', 'text', 'metadata', 'id'
+            results_list = vector_store.hybrid_search(query, query_vec, n_results=5)
+            # Normalize to match vector-only format for rendering
+            # We construct a fake 'results' dict just for consistent rendering logic below, 
+            # OR we just render directly from results_list. Rendering directly is easier.
             
-        ids = results['ids'][0]
-        distances = results['distances'][0]
-        documents = results['documents'][0]
-        metadatas = results['metadatas'][0] if results['metadatas'] else [{}] * len(ids)
-        
-        cards = []
-        for i in range(len(ids)):
-            score = 1.0 - distances[i] # Convert distance to similarity score approx
-            text_chunk = documents[i]
-            meta = metadatas[i]
+            if not results_list:
+                return html.Div("No relevant documents found.", className="text-muted")
+
+            cards = []
+            for i, res in enumerate(results_list):
+                score = res['score']
+                text_chunk = res['text']
+                
+                cards.append(
+                    dbc.Card([
+                        dbc.CardHeader(html.Div([
+                            html.Strong(f"Result {i+1} (Hybrid)"),
+                            html.Badge(f"RRF Score: {score:.4f}", color="warning", className="ms-2")
+                        ], className="d-flex justify-content-between align-items-center"), className="text-light"),
+                        dbc.CardBody([
+                            html.P(text_chunk, className="text-light small")
+                        ])
+                    ], className="mb-2 bg-dark border-warning")
+                )
+            return html.Div(cards)
+
+        else:
+            # Pure Vector Search
+            results = vector_store.query(query_vec, n_results=5)
             
-            # Try to find filename from metadata or ID
-            # Our pipeline stores source_id, chunk_index. It doesn't explicitly store filename in metadata currently (oops).
-            # But we can try to look it up from 'data' if we had a mapping. 
-            # For now, we'll just show the chunk text.
+            if not results or not results['ids'] or not results['ids'][0]:
+                return html.Div("No relevant documents found in local vector store.", className="text-muted")
+                
+            ids = results['ids'][0]
+            distances = results['distances'][0]
+            documents = results['documents'][0]
+            metadatas = results['metadatas'][0] if results['metadatas'] else [{}] * len(ids)
             
-            cards.append(
-                dbc.Card([
-                    dbc.CardHeader(html.Div([
-                        html.Strong(f"Result {i+1}"),
-                        html.Badge(f"Score: {score:.4f}", color="info", className="ms-2")
-                    ], className="d-flex justify-content-between align-items-center"), className="text-light"),
-                    dbc.CardBody([
-                        html.P(text_chunk, className="text-light small")
-                    ])
-                ], className="mb-2 bg-dark border-secondary")
-            )
-            
-        return html.Div(cards)
+            cards = []
+            for i in range(len(ids)):
+                score = 1.0 - distances[i] # Convert distance to similarity score approx
+                text_chunk = documents[i]
+                
+                cards.append(
+                    dbc.Card([
+                        dbc.CardHeader(html.Div([
+                            html.Strong(f"Result {i+1} (Vector)"),
+                            html.Badge(f"Sim Score: {score:.4f}", color="info", className="ms-2")
+                        ], className="d-flex justify-content-between align-items-center"), className="text-light"),
+                        dbc.CardBody([
+                            html.P(text_chunk, className="text-light small")
+                        ])
+                    ], className="mb-2 bg-dark border-secondary")
+                )
+            return html.Div(cards)
         
     except Exception as e:
         return html.Div(f"Retrieval Error: {str(e)}", className="text-danger")
