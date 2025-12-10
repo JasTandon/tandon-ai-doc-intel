@@ -7,7 +7,7 @@ name = "tandon_ai_doc_intel"
 version = "0.1.0"
 description = "A modular document-processing pipeline for AI-powered document intelligence."
 authors = [
-  { name = "User", email = "user@example.com" },
+  { name = "Jas Tandon", email = "jastandon@icloud.com" },
 ]
 readme = "README.md"
 requires-python = ">=3.9"
