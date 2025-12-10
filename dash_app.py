@@ -558,7 +558,7 @@ def update_inspector(selected_idx, data, api_key):
 
     # Evaluation Metrics Card
     dbc.Card([
-        dbc.CardHeader("📑 Research Paper Metrics", className="text-light"),
+        dbc.CardHeader("📑 Cost Analysis and Factuality Score Metrics", className="text-light"),
         dbc.ListGroup([
             dbc.ListGroupItem(f"💰 Est. Cost: ${doc.get('cost_estimate', 0.0):.6f}", className="bg-dark text-light"),
             dbc.ListGroupItem(f"✅ Factuality Score: {doc.get('factuality_score', 0.0):.2f}", className="bg-dark text-light", id="tooltip-factuality"),
