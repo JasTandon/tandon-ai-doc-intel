@@ -313,7 +313,10 @@ def render_tabs(active_tab, data, api_key):
 
         return html.Div([
             dbc.Row([
-                dbc.Col(dbc.Card([dbc.CardHeader("🤖 AI Risk Assessment"), dbc.CardBody(ai_risk_msg)], className="bg-dark border-info mb-3"), width=12)
+                dbc.Col(dbc.Card([
+                    dbc.CardHeader("🤖 AI Risk Assessment", style={"color": "white"}), 
+                    dbc.CardBody(ai_risk_msg, style={"color": "white"})
+                ], className="bg-dark border-info mb-3"), width=12)
             ]),
             dbc.Row([
                 dbc.Col(dcc.Graph(figure=fig_risk), width=4),
@@ -348,7 +351,10 @@ def render_tabs(active_tab, data, api_key):
             ai_cluster_msg = get_ai_insight(cluster_summary, "cluster", api_key)
             
             cluster_graph = html.Div([
-                dbc.Card([dbc.CardHeader("🤖 AI Cluster Analysis"), dbc.CardBody(ai_cluster_msg)], className="bg-dark border-info mb-3"),
+                dbc.Card([
+                    dbc.CardHeader("🤖 AI Cluster Analysis", style={"color": "white"}), 
+                    dbc.CardBody(ai_cluster_msg, style={"color": "white"})
+                ], className="bg-dark border-info mb-3"),
                 dcc.Graph(figure=fig_cluster)
             ])
 
@@ -356,13 +362,13 @@ def render_tabs(active_tab, data, api_key):
             dbc.Row([
                 dbc.Col(cluster_graph, width=8),
                 dbc.Col([
-                    html.H5("ML Metrics Reference", className="text-light"),
+                    html.H5("ML Metrics Reference", style={"color": "white"}),
                     html.Ul([
-                        html.Li(f"Avg Sentiment: {df['sentiment'].mean():.2f} (-1 to 1)", className="text-light"),
-                        html.Li(f"Avg Subjectivity: {df['subjectivity'].mean():.2f} (0 to 1)", className="text-light"),
-                        html.Li(f"Avg Gunning Fog: {df['gunning_fog'].mean():.1f} (Grade Level)", className="text-light"),
-                        html.Li(f"Avg Lexical Diversity: {df['lexical_diversity'].mean():.2f}", className="text-light")
-                    ], className="text-light")
+                        html.Li(f"Avg Sentiment: {df['sentiment'].mean():.2f} (-1 to 1)", style={"color": "white"}),
+                        html.Li(f"Avg Subjectivity: {df['subjectivity'].mean():.2f} (0 to 1)", style={"color": "white"}),
+                        html.Li(f"Avg Gunning Fog: {df['gunning_fog'].mean():.1f} (Grade Level)", style={"color": "white"}),
+                        html.Li(f"Avg Lexical Diversity: {df['lexical_diversity'].mean():.2f}", style={"color": "white"})
+                    ], style={"color": "white"})
                 ], width=4)
             ])
         ])
@@ -437,8 +443,8 @@ def update_inspector(selected_idx, data):
         
         dbc.Row([
             dbc.Col([
-                html.H5("🏷️ Extracted Topics", className="text-light"),
-                html.P(", ".join(doc.get('topics', [])) if doc.get('topics') else "No topics found.", className="text-light")
+                html.H5("🏷️ Extracted Topics", style={"color": "white"}),
+                html.P(", ".join(doc.get('topics', [])) if doc.get('topics') else "No topics found.", style={"color": "white"})
             ])
         ])
     ])
