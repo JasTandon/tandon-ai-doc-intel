@@ -272,41 +272,37 @@ def process_documents(set_progress, n_clicks, list_of_contents, list_of_names, a
             
         results_data.append(_serialize_result(res))
 
-    # 2. Process Single-Page Docs (Batched in groups of 3)
-    batch_size = 3
-    for i in range(0, len(single_page_docs), batch_size):
-        batch = single_page_docs[i : i + batch_size]
+    # 2. Process Single-Page Docs (Sequentially to avoid ThreadPool lockups)
+    
+    # Process them one by one in the main thread/loop to be safe
+    if single_page_docs:
+        logger.info(f"Processing {len(single_page_docs)} Single-Page Docs Sequentially...")
         
-        percent = int((processed_count / total_docs) * 100) if total_docs > 0 else 0
-        set_progress((str(percent), f"{percent}%"))
-        
-        logger.info(f"Processing Batch of {len(batch)} Single-Page Docs: {[d['filename'] for d in batch]}")
-        
-        # Use ThreadPoolExecutor to process batch in parallel
-        import concurrent.futures
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
-            future_to_doc = {
-                executor.submit(parse_contents, d['content'], d['filename'], api_key): d 
-                for d in batch
-            }
+        for i, doc in enumerate(single_page_docs):
+            percent = int((processed_count / total_docs) * 100) if total_docs > 0 else 0
+            set_progress((str(percent), f"{percent}%"))
             
-            for future in concurrent.futures.as_completed(future_to_doc):
-                d = future_to_doc[future]
+            n = doc['filename']
+            c = doc['content']
+            
+            logger.info(f"Processing Single-Page Doc {i+1}/{len(single_page_docs)}: {n}")
+            
+            try:
+                res, err = parse_contents(c, n, api_key)
                 processed_count += 1
                 
-                # Update progress for each item in batch
+                # Update progress
                 percent = int((processed_count / total_docs) * 100) if total_docs > 0 else 0
                 set_progress((str(percent), f"{percent}%"))
                 
-                try:
-                    res, err = future.result()
-                    if err:
-                        logger.error(f"Error in batch for {d['filename']}: {err}")
-                    else:
-                        results_data.append(_serialize_result(res))
-                except Exception as e:
-                    logger.error(f"Crash in batch for {d['filename']}: {e}")
+                if err:
+                    logger.error(f"Error processing {n}: {err}")
+                else:
+                    results_data.append(_serialize_result(res))
+            except Exception as e:
+                logger.error(f"CRASH processing {n}: {e}", exc_info=True)
+                # Continue to next file despite crash
+                processed_count += 1
 
     if not results_data and total_docs > 0:
          return [], "⚠️ All files failed. Check API Key or console logs."

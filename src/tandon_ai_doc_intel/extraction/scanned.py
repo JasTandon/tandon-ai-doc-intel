@@ -1,9 +1,7 @@
 import fitz
 import pytesseract
-from PIL import Image
+from PIL import Image, ImageOps, ImageFilter
 import io
-import cv2
-import numpy as np
 import tempfile
 import os
 import subprocess
@@ -17,7 +15,7 @@ logger = logging.getLogger(__name__)
 class ScannedPDFExtractor(BaseExtractor):
     """
     Extracts text from scanned PDFs using OCR (Tesseract).
-    Includes optional preprocessing (deskewing, denoising).
+    Includes optional preprocessing using Pillow (safer than OpenCV for multiprocessing).
     """
     
     def __init__(self, enable_preprocessing: bool = True):
@@ -25,43 +23,26 @@ class ScannedPDFExtractor(BaseExtractor):
 
     def _preprocess_image(self, image_path: str) -> str:
         """
-        Applies deskewing and denoising to the image using OpenCV.
-        Returns path to processed image.
+        Applies basic denoising/grayscale using Pillow.
+        Avoids OpenCV to prevent multiprocessing crashes on macOS.
         """
         try:
-            # Read image
-            img = cv2.imread(image_path)
-            if img is None:
-                return image_path
-            
-            # 1. Convert to grayscale
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            
-            # 2. Denoise
-            denoised = cv2.fastNlMeansDenoising(gray, h=10, searchWindowSize=21, templateWindowSize=7)
-            
-            # 3. Binarization (Otsu's thresholding)
-            _, binary = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            
-            # 4. Deskewing
-            coords = np.column_stack(np.where(binary > 0))
-            angle = cv2.minAreaRect(coords)[-1]
-            if angle < -45:
-                angle = -(90 + angle)
-            else:
-                angle = -angle
+            with Image.open(image_path) as img:
+                # Convert to grayscale
+                gray = ImageOps.grayscale(img)
                 
-            (h, w) = binary.shape[:2]
-            center = (w // 2, h // 2)
-            M = cv2.getRotationMatrix2D(center, angle, 1.0)
-            rotated = cv2.warpAffine(binary, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-            
-            # Write processed image
-            processed_path = image_path + "_processed.png"
-            cv2.imwrite(processed_path, rotated)
-            
-            return processed_path
-            
+                # Apply slight median filter for denoising
+                denoised = gray.filter(ImageFilter.MedianFilter(size=3))
+                
+                # Binarize (simple threshold)
+                fn = lambda x : 255 if x > 200 else 0
+                binary = denoised.point(fn, mode='1')
+                
+                # Save processed image
+                processed_path = image_path + "_processed.png"
+                binary.save(processed_path)
+                return processed_path
+                
         except Exception as e:
             logger.warning(f"Preprocessing failed for {image_path}: {e}")
             return image_path
@@ -72,13 +53,19 @@ class ScannedPDFExtractor(BaseExtractor):
         """
         logger.info(f"[ScannedExtractor] Processing page {page_num}...")
         
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
-            tmp_img.write(pix.tobytes("png"))
-            tmp_img_path = tmp_img.name
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
+                tmp_img.write(pix.tobytes("png"))
+                tmp_img_path = tmp_img.name
+            logger.debug(f"[ScannedExtractor] Wrote temp image for page {page_num} to {tmp_img_path}")
+        except Exception as e:
+            logger.error(f"[ScannedExtractor] Failed to write temp image for page {page_num}: {e}")
+            return ""
             
         try:
             # Preprocess if enabled
             if self.enable_preprocessing:
+                logger.debug(f"[ScannedExtractor] Preprocessing page {page_num}...")
                 final_img_path = self._preprocess_image(tmp_img_path)
             else:
                 final_img_path = tmp_img_path
@@ -86,15 +73,15 @@ class ScannedPDFExtractor(BaseExtractor):
             output_base = tmp_img_path + "_out"
             
             # Run Tesseract via CLI for stability
-            # Added basic timeout and retry logic
             cmd = ["tesseract", final_img_path, output_base]
             
             # Retry logic
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    logger.info(f"[ScannedExtractor] Running Tesseract CLI: {' '.join(cmd)}")
-                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                    logger.info(f"[ScannedExtractor] Running Tesseract CLI (Attempt {attempt+1}): {' '.join(cmd)}")
+                    # Increased timeout to 60s
+                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
                     break
                 except subprocess.TimeoutExpired:
                      logger.warning(f"[ScannedExtractor] Tesseract timeout on page {page_num} (attempt {attempt+1})")
@@ -104,15 +91,21 @@ class ScannedPDFExtractor(BaseExtractor):
                      logger.warning(f"[ScannedExtractor] Tesseract error on page {page_num}: {e}")
                      if attempt == max_retries - 1:
                          return ""
+                except Exception as e:
+                     logger.error(f"[ScannedExtractor] Unexpected error running Tesseract on page {page_num}: {e}")
+                     return ""
 
             # Read result
             output_file = output_base + ".txt"
             if os.path.exists(output_file):
+                logger.debug(f"[ScannedExtractor] Reading Tesseract output for page {page_num} from {output_file}")
                 with open(output_file, "r", encoding="utf-8") as f:
                     text = f.read()
                 os.remove(output_file)
                 return text
-            return ""
+            else:
+                logger.warning(f"[ScannedExtractor] No output file found for page {page_num}: {output_file}")
+                return ""
             
         finally:
             if os.path.exists(tmp_img_path):
@@ -129,17 +122,19 @@ class ScannedPDFExtractor(BaseExtractor):
             num_pages = len(doc)
             logger.info(f"[ScannedExtractor] Document has {num_pages} pages.")
             
-            # Use ThreadPool for parallel page processing
-            # Limit workers to prevent CPU saturation
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                futures = []
-                for i, page in enumerate(doc):
-                    # Lower DPI for speed, 150 is usually enough for readable text
-                    pix = page.get_pixmap(dpi=150)
-                    futures.append(executor.submit(self._ocr_page, i+1, pix))
-                
-                # Collect results in order
-                for future in futures:
-                    full_text.append(future.result())
+            if num_pages == 1:
+                logger.info("[ScannedExtractor] Processing single page sequentially.")
+                pix = doc[0].get_pixmap(dpi=150)
+                full_text.append(self._ocr_page(1, pix))
+            else:
+                # Use ThreadPool for parallel page processing
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    futures = []
+                    for i, page in enumerate(doc):
+                        pix = page.get_pixmap(dpi=150)
+                        futures.append(executor.submit(self._ocr_page, i+1, pix))
+                    
+                    for future in futures:
+                        full_text.append(future.result())
                 
         return "\n".join(full_text), tables

@@ -116,7 +116,7 @@ class DocumentPipeline:
                 result.chunks = self.enricher.chunk_text(result.text)
             
             # 5. Validation
-            if self.config.use_validation:
+            if self.config.enable_validation:
                 t0 = time.time()
                 self.validator.validate(result)
                 timings["Validation"] = time.time() - t0
@@ -125,7 +125,7 @@ class DocumentPipeline:
                 timings["Validation"] = 0.0
 
             # 6. Advanced Analytics (ML & Metrics)
-            if self.config.use_analytics:
+            if self.config.enable_analytics:
                 t0 = time.time()
                 try:
                     self.analytics.analyze(result)
