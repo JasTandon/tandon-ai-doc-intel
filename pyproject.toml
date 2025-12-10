@@ -38,6 +38,7 @@ dependencies = [
     "diskcache",
     "psutil",
     "multiprocess",
+    "jiwer",
 ]
 
 [project.optional-dependencies]

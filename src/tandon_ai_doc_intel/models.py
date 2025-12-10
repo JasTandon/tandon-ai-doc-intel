@@ -39,3 +39,13 @@ class DocumentResult:
     entity_density: float = 0.0 # Entities count / Total words
     sentence_complexity: float = 0.0 # Std Dev of sentence length (proxy for structural variance)
 
+    # Evaluation & Cost Metrics
+    runtime_metrics: Dict[str, float] = field(default_factory=dict)
+    cost_estimate_usd: float = 0.0
+    factuality_score: float = 0.0 # Proxy for RAG faithfulness
+    
+    # Ground Truth Metrics (if available)
+    ocr_cer: Optional[float] = None
+    ocr_wer: Optional[float] = None
+    table_accuracy: Optional[float] = None
+
