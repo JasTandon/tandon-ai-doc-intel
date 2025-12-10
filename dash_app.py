@@ -20,6 +20,7 @@ import diskcache
 # Ensure src is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 from tandon_ai_doc_intel import DocumentPipeline
+from tandon_ai_doc_intel.embeddings import VectorStore, OpenAIEmbeddings
 
 # --- Cache Setup for Background Callbacks ---
 cache = diskcache.Cache("./cache")
@@ -627,47 +628,51 @@ def run_retrieval(n_clicks, query, data, api_key):
     if not query or not api_key:
         return html.Div("Please enter a query and ensure API Key is set.", className="text-warning")
     
-    # We need to rebuild a temporary vector store from the stored data
-    # because we don't have a persistent server-side vector store in this simple app demo.
-    # In a real app, this would query ChromaDB directly.
-    
-    from tandon_ai_doc_intel.embeddings import OpenAIEmbeddings
-    from sklearn.metrics.pairwise import cosine_similarity
-    
     try:
-        # 1. Embed Query
-        client = OpenAI(api_key=api_key)
-        resp = client.embeddings.create(input=query, model="text-embedding-ada-002")
-        query_vec = resp.data[0].embedding
+        # 1. Initialize Components
+        embedder = OpenAIEmbeddings(api_key=api_key)
+        vector_store = VectorStore() # Defaults to ./chroma_db
         
-        # 2. Brute-force search over stored document embeddings (doc-level) 
-        # Note: Ideally we search chunks, but we only stored doc-level average embeddings in 'stored-data' to save space.
-        # For a better demo, we should have stored chunks. 
-        # But 'stored-data' has 'embeddings' field which is doc-level.
+        # 2. Embed Query
+        # OpenAIEmbeddings.embed takes a list of strings
+        # We need a single vector, but the provider returns List[List[float]]
+        query_vecs = embedder.embed([query])
+        if not query_vecs:
+            return html.Div("Failed to generate embedding for query.", className="text-danger")
+        query_vec = query_vecs[0]
         
-        results = []
-        for d in data:
-            if d.get('embeddings'):
-                score = cosine_similarity([query_vec], [d['embeddings']])[0][0]
-                results.append((score, d))
+        # 3. Query Vector Store
+        results = vector_store.query(query_vec, n_results=5)
         
-        # Sort by score
-        results.sort(key=lambda x: x[0], reverse=True)
-        top_k = results[:5]
+        # Results format: {'ids': [['id1', ...]], 'distances': [[0.1, ...]], 'documents': [['text', ...]], 'metadatas': [[{...}, ...]]}
         
-        if not top_k:
-            return html.Div("No embeddings found in processed documents.", className="text-muted")
+        if not results or not results['ids'] or not results['ids'][0]:
+            return html.Div("No relevant documents found in local vector store.", className="text-muted")
             
+        ids = results['ids'][0]
+        distances = results['distances'][0]
+        documents = results['documents'][0]
+        metadatas = results['metadatas'][0] if results['metadatas'] else [{}] * len(ids)
+        
         cards = []
-        for score, doc in top_k:
+        for i in range(len(ids)):
+            score = 1.0 - distances[i] # Convert distance to similarity score approx
+            text_chunk = documents[i]
+            meta = metadatas[i]
+            
+            # Try to find filename from metadata or ID
+            # Our pipeline stores source_id, chunk_index. It doesn't explicitly store filename in metadata currently (oops).
+            # But we can try to look it up from 'data' if we had a mapping. 
+            # For now, we'll just show the chunk text.
+            
             cards.append(
                 dbc.Card([
                     dbc.CardHeader(html.Div([
-                        html.Strong(doc['filename']),
-                        html.Badge(f"{score:.4f}", color="info", className="ms-2")
+                        html.Strong(f"Result {i+1}"),
+                        html.Badge(f"Score: {score:.4f}", color="info", className="ms-2")
                     ], className="d-flex justify-content-between align-items-center"), className="text-light"),
                     dbc.CardBody([
-                        html.P(doc['summary'][:200] + "..." if doc['summary'] else "No summary available.", className="text-light small")
+                        html.P(text_chunk, className="text-light small")
                     ])
                 ], className="mb-2 bg-dark border-secondary")
             )
